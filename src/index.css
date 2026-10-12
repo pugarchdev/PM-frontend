@@ -1,0 +1,101 @@
+@import "tailwindcss";
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+@layer base {
+  :root {
+    --font-display: 'Caprasimo', serif;
+    --font-sans: 'Figtree', sans-serif;
+    --color-cream: #FBF9F4;
+    --color-surface: #F5F1E8;
+    --color-surface-hover: #ECE7DD;
+    --color-terracotta: #C85A32;
+    --color-terracotta-dark: #A94320;
+    --color-sage: #526E55;
+    --color-sage-light: #EBF2EB;
+    --color-charcoal: #231E1B;
+    --color-muted: #6E6862;
+    --color-danger: #B3261E;
+    --color-amber: #C67800;
+  }
+
+  html {
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: hidden;
+    margin: 0;
+    padding: 0;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-cream);
+    color: var(--color-charcoal);
+    font-family: var(--font-sans);
+    -webkit-tap-highlight-color: transparent;
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: hidden;
+    margin: 0;
+    padding: 0;
+    min-width: 320px;
+  }
+
+  /* #root fills the viewport; the App.tsx div IS the shell */
+  #root {
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+
+  /* Lock html/body on mobile so the fixed shell works */
+  @media screen and (max-width: 640px) {
+    html, body {
+      height: 100dvh;
+      overflow: hidden;
+    }
+    #root {
+      height: 100dvh;
+      overflow: hidden;
+    }
+  }
+
+  h1, h2, h3, .font-display {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+  }
+
+  /* Prevent automatic text zoom on input focus in iOS Safari */
+  @media screen and (max-width: 768px) {
+    input, select, textarea {
+      font-size: 16px !important;
+    }
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #D9D2C7;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #C4BCB0;
+}
+
+/* Hide scrollbar for horizontal scroll strips while preserving touch scroll */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
