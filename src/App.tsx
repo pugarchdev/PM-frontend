@@ -21,6 +21,7 @@ import { CalendarView } from './views/CalendarView.tsx';
 import { UserManagementView } from './views/UserManagementView.tsx';
 import { ProfileView } from './views/ProfileView.tsx';
 import { SettingsView } from './views/SettingsView.tsx';
+import pugLogo from './assets/pugarch-logo.png';
 import { getSocket } from './lib/socket.ts';
 import { apiFetch } from './lib/api.ts';
 
@@ -47,7 +48,7 @@ function LoadingScreen() {
   return (
     <div className="min-h-screen bg-[#FBF9F4] flex flex-col items-center justify-center space-y-4">
       <img
-        src="/src/assets/pugarch-logo.png"
+        src={pugLogo}
         alt="PugArch"
         className="h-16 w-auto object-contain animate-pulse"
         style={{ mixBlendMode: 'multiply' }}

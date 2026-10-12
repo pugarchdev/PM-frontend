@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.tsx';
+import pugLogo from '../assets/pugarch-logo.png';
 import {
   Shield,
   Lock,
@@ -385,7 +386,7 @@ export const AuthView: React.FC = () => {
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center space-y-2 mb-6">
         <div className="flex justify-center mb-1">
           <img
-            src="/src/assets/pugarch-logo.png"
+            src={pugLogo}
             alt="PugArch Logo"
             className="h-16 sm:h-20 w-auto object-contain transition-transform duration-300 hover:scale-105"
             style={{ mixBlendMode: 'multiply' }}

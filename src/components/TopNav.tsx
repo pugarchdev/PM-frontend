@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.tsx';
 import { Shield, UserCheck, ChevronDown, Building2, Bell, LogOut, Calendar, X, Users, User, Settings } from 'lucide-react';
+import pugLogo from '../assets/pugarch-logo.png';
 import { UserManagementModal } from './UserManagementModal.tsx';
 
 interface TopNavProps {
@@ -55,7 +56,7 @@ export const TopNav: React.FC<TopNavProps> = ({ onOpenNotifications, onOpenCalen
             {/* Desktop brand */}
             <div className="hidden sm:flex items-center gap-2">
               <img
-                src="/src/assets/pugarch-logo.png"
+                src={pugLogo}
                 alt="PugArch"
                 className="h-10 w-auto object-contain shrink-0"
                 style={{ mixBlendMode: 'multiply' }}
@@ -67,7 +68,7 @@ export const TopNav: React.FC<TopNavProps> = ({ onOpenNotifications, onOpenCalen
             {/* Mobile brand */}
             <div className="sm:hidden flex items-center gap-1.5">
               <img
-                src="/src/assets/pugarch-logo.png"
+                src={pugLogo}
                 alt="PugArch"
                 className="h-8 w-auto object-contain shrink-0"
                 style={{ mixBlendMode: 'multiply' }}
