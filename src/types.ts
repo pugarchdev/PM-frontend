@@ -1,4 +1,4 @@
-export type Role = 'Employee' | 'ProjectOwner' | 'CEO';
+export type Role = 'Employee' | 'CTO' | 'CEO';
 export type ProjectStatus = 'ON_TRACK' | 'AT_RISK' | 'OFF_TRACK';
 export type TaskState = 'Not started' | 'In progress' | 'Blocked' | 'Completed';
 export type TaskPriority = 'Low' | 'Normal' | 'High';
@@ -16,6 +16,7 @@ export interface User {
   avatarUrl: string | null;
   isSignupCompleted?: boolean;
   createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface QualityCheck {

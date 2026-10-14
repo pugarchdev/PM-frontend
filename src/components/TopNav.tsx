@@ -22,8 +22,8 @@ export const TopNav: React.FC<TopNavProps> = ({ onOpenNotifications, onOpenCalen
     switch (role) {
       case 'CEO':
         return 'bg-[#FBE8E2] text-[#A63C1E] border border-[#F3CEC1] font-semibold';
-      case 'ProjectOwner':
-        return 'bg-[#EBF2EB] text-[#2D5A34] border border-[#C6DEC7]';
+      case 'CTO':
+        return 'bg-[#EBF2EB] text-[#2D5A34] border border-[#C6DEC7] font-semibold';
       default:
         return 'bg-[#EFECE4] text-[#554E45] border border-[#DDD6C8]';
     }
@@ -33,11 +33,18 @@ export const TopNav: React.FC<TopNavProps> = ({ onOpenNotifications, onOpenCalen
     switch (role) {
       case 'CEO':
         return 'CEO';
-      case 'ProjectOwner':
-        return 'Project Owner';
+      case 'CTO':
+        return 'CTO';
       default:
         return 'Employee';
     }
+  };
+
+  const getInitialsAvatar = (name?: string, avatarUrl?: string | null) => {
+    if (avatarUrl && !avatarUrl.includes('images.unsplash.com') && !avatarUrl.includes('photo-')) {
+      return avatarUrl;
+    }
+    return `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name || 'User')}`;
   };
 
   return (
@@ -129,7 +136,7 @@ export const TopNav: React.FC<TopNavProps> = ({ onOpenNotifications, onOpenCalen
                 title="Account Profile"
               >
                 <img
-                  src={currentUser?.avatarUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${currentUser?.name || 'User'}`}
+                  src={getInitialsAvatar(currentUser?.name, currentUser?.avatarUrl)}
                   alt={currentUser?.name}
                   className="w-7 h-7 lg:w-8 lg:h-8 rounded-full object-cover border border-white shadow-2xs shrink-0"
                   referrerPolicy="no-referrer"
@@ -147,7 +154,7 @@ export const TopNav: React.FC<TopNavProps> = ({ onOpenNotifications, onOpenCalen
                 <span
                   className={`hidden sm:inline text-[10px] px-2 py-0.5 rounded-full ${currentUser ? getRoleBadgeStyle(currentUser.role) : ''}`}
                 >
-                  {currentUser?.role === 'ProjectOwner' ? 'Owner' : currentUser?.role}
+                  {currentUser?.role === 'CTO' ? 'CTO' : currentUser?.role}
                 </span>
                 <ChevronDown className="w-3.5 h-3.5 text-[#7A7165]" />
               </button>
@@ -173,7 +180,7 @@ export const TopNav: React.FC<TopNavProps> = ({ onOpenNotifications, onOpenCalen
 
                   <div className="flex items-center gap-3">
                     <img
-                      src={currentUser?.avatarUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${currentUser?.name || 'User'}`}
+                      src={getInitialsAvatar(currentUser?.name, currentUser?.avatarUrl)}
                       alt={currentUser?.name}
                       className="w-12 h-12 rounded-full border border-[#E8E2D5] shadow-xs"
                       referrerPolicy="no-referrer"
@@ -303,7 +310,7 @@ export const TopNav: React.FC<TopNavProps> = ({ onOpenNotifications, onOpenCalen
               {/* User Identity Details */}
               <div className="flex items-center gap-3.5 pt-1">
                 <img
-                  src={currentUser?.avatarUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${currentUser?.name || 'User'}`}
+                  src={getInitialsAvatar(currentUser?.name, currentUser?.avatarUrl)}
                   alt={currentUser?.name}
                   className="w-14 h-14 rounded-full border-2 border-[#E8E2D5] shadow-xs shrink-0"
                   referrerPolicy="no-referrer"

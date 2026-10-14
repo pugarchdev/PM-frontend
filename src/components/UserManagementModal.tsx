@@ -48,7 +48,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
   const [formEmail, setFormEmail] = useState('');
   const [formPhone, setFormPhone] = useState('');
   const [formDept, setFormDept] = useState('Operations');
-  const [formRole, setFormRole] = useState<'Employee' | 'ProjectOwner'>('Employee');
+  const [formRole, setFormRole] = useState<'Employee' | 'CTO'>('Employee');
   const [submitting, setSubmitting] = useState(false);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -283,12 +283,12 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
                               className={`text-[10px] px-2 py-0.2 rounded-full font-semibold ${
                                 u.role === 'CEO'
                                   ? 'bg-[#FBE8E2] text-[#A63C1E] border border-[#F3CEC1]'
-                                  : u.role === 'ProjectOwner'
+                                  : u.role === 'CTO'
                                   ? 'bg-[#EBF2EB] text-[#2D5A34] border border-[#C6DEC7]'
                                   : 'bg-[#EFECE4] text-[#554E45] border border-[#DDD6C8]'
                               }`}
                             >
-                              {u.role === 'ProjectOwner' ? 'Project Owner' : u.role}
+                              {u.role === 'CTO' ? 'CTO' : u.role}
                             </span>
                           </div>
 
@@ -424,7 +424,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
                     className="w-full px-3 py-2.5 rounded-xl border border-[#DDD6C8] bg-white text-xs text-[#231E1B] focus:outline-hidden focus:border-[#C85A32] min-h-[44px]"
                   >
                     <option value="Employee">Employee</option>
-                    <option value="ProjectOwner">Project Owner</option>
+                    <option value="CTO">CTO</option>
                   </select>
                 </div>
               </div>

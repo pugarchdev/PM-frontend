@@ -7,16 +7,27 @@ interface AuthContextType {
   currentUser: User | null;
   directory: User[];
   isLoading: boolean;
-  login: (credentials: { identifier?: string; email?: string; phone?: string; userId?: string; password?: string }) => Promise<{ success: boolean; error?: string }>;
+  isInitialLoading: boolean;
+  login: (credentials: {
+    identifier?: string;
+    email?: string;
+    phone?: string;
+    userId?: string;
+    password?: string;
+  }) => Promise<{ success: boolean; error?: string }>;
   sendVerificationCode: (data: { email: string; phone: string }) => Promise<{ success: boolean; error?: string; devCode?: string; message?: string }>;
-  signup: (data: { email: string; phone: string; password: string; code?: string; name?: string }) => Promise<{ success: boolean; error?: string }>;
+  verifyEmailOtp: (data: { email: string; phone?: string; code: string }) => Promise<{ success: boolean; error?: string; message?: string; isEmailVerified?: boolean; remainingAttempts?: number }>;
+  resendVerificationCode: (data: { email: string; phone?: string }) => Promise<{ success: boolean; error?: string; devCode?: string; message?: string; remainingSeconds?: number }>;
+  signup: (data: { email: string; phone: string; password: string; confirmPassword?: string; code?: string; name?: string }) => Promise<{ success: boolean; error?: string }>;
   forgotPassword: (data: { identifier: string }) => Promise<{ success: boolean; error?: string; devCode?: string; message?: string }>;
-  resetPassword: (data: { identifier: string; code: string; newPassword: string }) => Promise<{ success: boolean; error?: string; message?: string }>;
+  resetPassword: (data: { identifier: string; code: string; newPassword: string; confirmPassword?: string }) => Promise<{ success: boolean; error?: string; message?: string }>;
   preRegisterUser: (data: { name: string; email: string; phone: string; department?: string; role?: string }) => Promise<{ success: boolean; error?: string; user?: User }>;
+  updateProfile: (data: { name: string; email?: string; phone?: string; department?: string }) => Promise<{ success: boolean; error?: string; user?: User }>;
   logout: () => Promise<void>;
   switchUser: (userId: string) => Promise<void>;
   refreshUser: () => Promise<void>;
   isCEO: boolean;
+  isCTO: boolean;
   isProjectOwner: boolean;
   isEmployee: boolean;
 }
@@ -26,11 +37,11 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [directory, setDirectory] = useState<User[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
 
   const fetchSession = async () => {
     try {
-      setIsLoading(true);
       const res = await apiFetch('/api/auth/me');
       if (res.ok) {
         const data = await res.json();
@@ -44,6 +55,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error('Failed to load auth session:', err);
     } finally {
       setIsLoading(false);
+      setIsInitialLoading(false);
     }
   };
 
@@ -59,7 +71,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     password?: string;
   }): Promise<{ success: boolean; error?: string }> => {
     try {
-      setIsLoading(true);
       const res = await apiFetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -77,8 +88,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message || 'Login failed' };
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -102,15 +111,84 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const verifyEmailOtp = async (data: {
+    email: string;
+    phone?: string;
+    code: string;
+  }): Promise<{
+    success: boolean;
+    error?: string;
+    message?: string;
+    isEmailVerified?: boolean;
+    remainingAttempts?: number;
+  }> => {
+    try {
+      const res = await apiFetch('/api/auth/register/verify-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      const resData = await res.json();
+      if (!res.ok) {
+        return {
+          success: false,
+          error: resData.error || 'Failed to verify verification code',
+          remainingAttempts: resData.remainingAttempts,
+        };
+      }
+      return {
+        success: true,
+        message: resData.message,
+        isEmailVerified: resData.isEmailVerified,
+      };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Network error while verifying code' };
+    }
+  };
+
+  const resendVerificationCode = async (data: {
+    email: string;
+    phone?: string;
+  }): Promise<{
+    success: boolean;
+    error?: string;
+    devCode?: string;
+    message?: string;
+    remainingSeconds?: number;
+  }> => {
+    try {
+      const res = await apiFetch('/api/auth/register/resend-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      const resData = await res.json();
+      if (!res.ok) {
+        return {
+          success: false,
+          error: resData.error || 'Failed to resend verification code',
+          remainingSeconds: resData.remainingSeconds,
+        };
+      }
+      return {
+        success: true,
+        devCode: resData.devCode,
+        message: resData.message,
+      };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Network error while resending code' };
+    }
+  };
+
   const signup = async (data: {
     email: string;
     phone: string;
     password: string;
+    confirmPassword?: string;
     code?: string;
     name?: string;
   }): Promise<{ success: boolean; error?: string }> => {
     try {
-      setIsLoading(true);
       const res = await apiFetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -125,8 +203,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message || 'Signup failed' };
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -153,6 +229,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     identifier: string;
     code: string;
     newPassword: string;
+    confirmPassword?: string;
   }): Promise<{ success: boolean; error?: string; message?: string }> => {
     try {
       const res = await apiFetch('/api/auth/reset-password', {
@@ -193,6 +270,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const updateProfile = async (data: {
+    name: string;
+    email?: string;
+    phone?: string;
+    department?: string;
+  }): Promise<{ success: boolean; error?: string; user?: User }> => {
+    try {
+      setIsLoading(true);
+      const res = await apiFetch('/api/users/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      const resData = await res.json();
+      if (!res.ok) {
+        return { success: false, error: resData.error || 'Failed to update profile' };
+      }
+      if (resData.user) {
+        setCurrentUser(resData.user);
+      }
+      // Re-fetch session so directory, top navigation and socket are kept in sync
+      await fetchSession();
+      return { success: true, user: resData.user };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Network error updating profile' };
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const logout = async (): Promise<void> => {
     try {
       setIsLoading(true);
@@ -215,7 +322,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const isCEO = currentUser?.role === 'CEO';
-  const isProjectOwner = currentUser?.role === 'ProjectOwner' || isCEO;
+  const isCTO = currentUser?.role === 'CTO' || isCEO;
+  const isProjectOwner = isCTO;
   const isEmployee = currentUser?.role === 'Employee';
 
   return (
@@ -224,16 +332,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         currentUser,
         directory,
         isLoading,
+        isInitialLoading,
         login,
         sendVerificationCode,
+        verifyEmailOtp,
+        resendVerificationCode,
         signup,
         forgotPassword,
         resetPassword,
         preRegisterUser,
+        updateProfile,
         logout,
         switchUser,
         refreshUser,
         isCEO,
+        isCTO,
         isProjectOwner,
         isEmployee,
       }}

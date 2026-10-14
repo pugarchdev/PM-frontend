@@ -568,10 +568,10 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onSelectProject }) =
                   >
                     <option value="">I will be the owner (default)</option>
                     {directory
-                      .filter((u) => u.role === 'ProjectOwner' || u.role === 'Employee')
+                      .filter((u) => u.role === 'CTO' || u.role === 'Employee')
                       .map((user) => (
                         <option key={user.id} value={user.id}>
-                          {user.name} ({user.role === 'ProjectOwner' ? 'Project Owner' : 'Employee'})
+                          {user.name} ({user.role === 'CTO' ? 'CTO' : 'Employee'})
                         </option>
                       ))}
                   </select>

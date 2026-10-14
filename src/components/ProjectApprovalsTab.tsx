@@ -233,7 +233,7 @@ export const ProjectApprovalsTab: React.FC<ProjectApprovalsTabProps> = ({ projec
               ? currentUser?.id === req.project.ownerId
               : projectOwnerId
               ? currentUser?.id === projectOwnerId
-              : currentUser?.role === 'ProjectOwner';
+              : currentUser?.role === 'CTO';
             const isDesignatedApprover = currentUser?.id === req.approverId;
             const canDecide = !isEmployee && (isCEO || isProjectOwner || isDesignatedApprover) && req.state === 'Pending';
 

@@ -293,7 +293,7 @@ export const ProjectChatTab: React.FC<ProjectChatTabProps> = ({ projectId, proje
                   <div className={`flex items-center gap-1.5 text-[10px] sm:text-[11px] mb-1 ${isMe ? 'flex-row-reverse' : ''}`}>
                     <span className="font-bold text-[#231E1B]">{msg.author?.name || 'Unknown'}</span>
                     <span className="text-[9px] sm:text-[10px] px-1.5 py-0.2 rounded-full bg-[#EFECE4] text-[#554E45]">
-                      {msg.author?.role === 'ProjectOwner' ? 'Owner' : msg.author?.role}
+                      {msg.author?.role === 'CTO' ? 'CTO' : msg.author?.role}
                     </span>
                     <span className="text-[#9B9287] text-[9px] sm:text-[10px]">
                       {new Date(msg.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

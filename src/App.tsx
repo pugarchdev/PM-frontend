@@ -64,10 +64,10 @@ function LoadingScreen() {
 
 // 1. Protected Route: Requires authentication and completed signup
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { currentUser, isLoading } = useAuth();
+  const { currentUser, isInitialLoading } = useAuth();
   const location = useLocation();
 
-  if (isLoading) {
+  if (isInitialLoading) {
     return <LoadingScreen />;
   }
 
@@ -81,10 +81,10 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 // 2. HR/CEO Protected Route: Requires CEO executive privileges
 function CEOProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { currentUser, isCEO, isLoading } = useAuth();
+  const { currentUser, isCEO, isInitialLoading } = useAuth();
   const location = useLocation();
 
-  if (isLoading) {
+  if (isInitialLoading) {
     return <LoadingScreen />;
   }
 
@@ -101,10 +101,10 @@ function CEOProtectedRoute({ children }: { children: React.ReactNode }) {
 
 // 3. Public Only Route: Redirects already-authenticated users to their dashboard
 function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
-  const { currentUser, isLoading } = useAuth();
+  const { currentUser, isInitialLoading } = useAuth();
   const location = useLocation();
 
-  if (isLoading) {
+  if (isInitialLoading) {
     return <LoadingScreen />;
   }
 

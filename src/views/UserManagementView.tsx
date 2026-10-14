@@ -56,7 +56,7 @@ export const UserManagementView: React.FC = () => {
   const [formEmail, setFormEmail] = useState('');
   const [formPhone, setFormPhone] = useState('');
   const [formDept, setFormDept] = useState('Operations');
-  const [formRole, setFormRole] = useState<'Employee' | 'ProjectOwner'>('Employee');
+  const [formRole, setFormRole] = useState<'Employee' | 'CTO'>('Employee');
   const [submitting, setSubmitting] = useState(false);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -342,7 +342,7 @@ export const UserManagementView: React.FC = () => {
                           <div className="min-w-0">
                             <h4 className="text-xs font-bold text-[#231E1B] truncate">{u.name}</h4>
                             <span className="inline-block text-[10px] font-semibold text-[#70675D]">
-                              {u.role === 'ProjectOwner' ? 'Project Owner' : u.role}
+                              {u.role === 'CTO' ? 'CTO' : u.role}
                             </span>
                           </div>
                         </div>
@@ -478,7 +478,7 @@ export const UserManagementView: React.FC = () => {
                     className="w-full px-3.5 py-2.5 rounded-xl border border-[#DDD6C8] bg-white text-xs text-[#231E1B] focus:outline-hidden focus:border-[#C85A32] min-h-[44px]"
                   >
                     <option value="Employee">Employee (Team Member)</option>
-                    <option value="ProjectOwner">Project Owner (Lead)</option>
+                    <option value="CTO">CTO (Chief Technology Officer)</option>
                   </select>
                 </div>
               </div>
