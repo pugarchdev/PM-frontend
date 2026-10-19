@@ -21,11 +21,14 @@ interface AuthContextType {
   signup: (data: { email: string; phone: string; password: string; confirmPassword?: string; code?: string; name?: string }) => Promise<{ success: boolean; error?: string }>;
   forgotPassword: (data: { identifier: string }) => Promise<{ success: boolean; error?: string; devCode?: string; message?: string }>;
   resetPassword: (data: { identifier: string; code: string; newPassword: string; confirmPassword?: string }) => Promise<{ success: boolean; error?: string; message?: string }>;
-  preRegisterUser: (data: { name: string; email: string; phone: string; department?: string; role?: string }) => Promise<{ success: boolean; error?: string; user?: User }>;
+  preRegisterUser: (data: { name: string; email: string; phone: string; department?: string; role?: string; roleId?: string; managerId?: string }) => Promise<{ success: boolean; error?: string; user?: User }>;
   updateProfile: (data: { name: string; email?: string; phone?: string; department?: string }) => Promise<{ success: boolean; error?: string; user?: User }>;
   logout: () => Promise<void>;
   switchUser: (userId: string) => Promise<void>;
   refreshUser: () => Promise<void>;
+  isExecutive: boolean;
+  canManageUsers: boolean;
+  roleRank: number;
   isCEO: boolean;
   isCTO: boolean;
   isProjectOwner: boolean;
@@ -253,6 +256,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     phone: string;
     department?: string;
     role?: string;
+    roleId?: string;
+    managerId?: string;
   }): Promise<{ success: boolean; error?: string; user?: User }> => {
     try {
       const res = await apiFetch('/api/users/pre-register', {
@@ -321,10 +326,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await fetchSession();
   };
 
-  const isCEO = currentUser?.role === 'CEO';
-  const isCTO = currentUser?.role === 'CTO' || isCEO;
+  const isExecutive = currentUser?.isExecutive ?? (currentUser?.role === 'CEO');
+  const canManageUsers = currentUser?.canManageUsers ?? isExecutive;
+  const roleRank = currentUser?.roleRank ?? (isExecutive ? 1 : currentUser?.role === 'CTO' ? 2 : currentUser?.role === 'Intern' ? 4 : 3);
+  const isCEO = isExecutive;
+  const isCTO = roleRank <= 2;
   const isProjectOwner = isCTO;
-  const isEmployee = currentUser?.role === 'Employee';
+  const isEmployee = roleRank >= 3;
 
   return (
     <AuthContext.Provider
@@ -345,6 +353,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         logout,
         switchUser,
         refreshUser,
+        isExecutive,
+        canManageUsers,
+        roleRank,
         isCEO,
         isCTO,
         isProjectOwner,

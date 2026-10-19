@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext.tsx';
-import { apiFetch } from '../lib/api.ts';
-import { Project, Phase, Task, Issue, Risk, Milestone, QualityCheck } from '../types.ts';
+import { apiFetch, apiUrl } from '../lib/api.ts';
+import { Project, Phase, Task, Issue, Risk, Milestone, QualityCheck, IssueAttachment } from '../types.ts';
 import { StatusBadge, PriorityBadge, SeverityBadge, TaskStateBadge } from '../components/StatusBadge.tsx';
+import { RaiseIssueModal } from '../components/RaiseIssueModal.tsx';
+import { IssueEvidenceViewer } from '../components/IssueEvidenceViewer.tsx';
 import { ProjectChatTab } from '../components/ProjectChatTab.tsx';
 import { ProjectBudgetTab } from '../components/ProjectBudgetTab.tsx';
 import { ProjectApprovalsTab } from '../components/ProjectApprovalsTab.tsx';
@@ -29,9 +31,14 @@ import {
   ChevronDown,
   ChevronUp,
   FileText,
+  FileSpreadsheet,
+  FileImage,
+  File as FileIcon,
+  Paperclip,
   AlertOctagon,
   X,
   History,
+  Users,
 } from 'lucide-react';
 
 interface ProjectDetailViewProps {
@@ -49,6 +56,91 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const projectMembers = React.useMemo(() => {
+    if (!project) return [];
+    const map = new Map<
+      string,
+      {
+        id: string;
+        name: string;
+        roleName: string;
+        isIntern: boolean;
+        membershipType: string;
+        avatarUrl?: string | null;
+        taskCount: number;
+        activeTaskCount: number;
+      }
+    >();
+
+    if (project.owner) {
+      const isIntern =
+        (project.owner as any).roleDefinition?.rank === 4 ||
+        (project.owner as any).role === 'Intern';
+      map.set(project.owner.id, {
+        id: project.owner.id,
+        name: project.owner.name,
+        roleName:
+          (project.owner as any).roleDefinition?.name ||
+          (project.owner as any).role ||
+          'Project Owner',
+        isIntern,
+        membershipType: 'Project Owner',
+        avatarUrl: project.owner.avatarUrl,
+        taskCount: 0,
+        activeTaskCount: 0,
+      });
+    }
+
+    project.memberships?.forEach((m: any) => {
+      if (m.user && !map.has(m.user.id)) {
+        const isIntern =
+          m.user.roleDefinition?.rank === 4 || m.user.role === 'Intern';
+        map.set(m.user.id, {
+          id: m.user.id,
+          name: m.user.name,
+          roleName: m.user.roleDefinition?.name || m.user.role || 'Member',
+          isIntern,
+          membershipType: m.role || 'Member',
+          avatarUrl: m.user.avatarUrl,
+          taskCount: 0,
+          activeTaskCount: 0,
+        });
+      }
+    });
+
+    project.phases?.forEach((ph) => {
+      ph.tasks?.forEach((t) => {
+        if (t.assignee) {
+          if (!map.has(t.assignee.id)) {
+            const isIntern =
+              (t.assignee as any).roleDefinition?.rank === 4 ||
+              (t.assignee as any).role === 'Intern';
+            map.set(t.assignee.id, {
+              id: t.assignee.id,
+              name: t.assignee.name,
+              roleName:
+                (t.assignee as any).roleDefinition?.name ||
+                (t.assignee as any).role ||
+                'Contributor',
+              isIntern,
+              membershipType: 'Contributor',
+              avatarUrl: t.assignee.avatarUrl,
+              taskCount: 0,
+              activeTaskCount: 0,
+            });
+          }
+          const entry = map.get(t.assignee.id)!;
+          entry.taskCount++;
+          if (t.state !== 'Completed') {
+            entry.activeTaskCount++;
+          }
+        }
+      });
+    });
+
+    return Array.from(map.values());
+  }, [project]);
   const [activeTab, setActiveTab] = useState<
     | 'overview'
     | 'phases'
@@ -84,9 +176,8 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   const [newTaskPlannedHours, setNewTaskPlannedHours] = useState(8);
 
   const [showNewIssueModal, setShowNewIssueModal] = useState(false);
-  const [newIssueTitle, setNewIssueTitle] = useState('');
-  const [newIssueSeverity, setNewIssueSeverity] = useState<'Minor' | 'Major' | 'Critical'>('Major');
-  const [newIssueDetail, setNewIssueDetail] = useState('');
+  const [selectedEvidence, setSelectedEvidence] = useState<{ issueId: string; attachment: IssueAttachment } | null>(null);
+  const [expandedSteps, setExpandedSteps] = useState<Record<string, boolean>>({});
 
   const [showNewRiskModal, setShowNewRiskModal] = useState(false);
   const [newRiskDesc, setNewRiskDesc] = useState('');
@@ -633,52 +724,6 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     }
   };
 
-  // CREATE ISSUE
-  const handleCreateIssue = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newIssueTitle.trim() || !newIssueDetail.trim()) {
-      showToast('error', 'Issue title and detail are required');
-      return;
-    }
-    if (submittingRef.current || submitting) return;
-    submittingRef.current = true;
-    setSubmitting(true);
-    try {
-      const res = await apiFetch('/api/issues', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          projectId,
-          title: newIssueTitle.trim(),
-          severity: newIssueSeverity,
-          detail: newIssueDetail.trim(),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to raise issue');
-
-      // Immediate local state update
-      setProject((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          issues: [data, ...(prev.issues || [])],
-        };
-      });
-
-      showToast('success', `Issue "${newIssueTitle}" logged`);
-      setShowNewIssueModal(false);
-      setNewIssueTitle('');
-      setNewIssueDetail('');
-      fetchProject(false);
-    } catch (err: any) {
-      showToast('error', err.message);
-    } finally {
-      submittingRef.current = false;
-      setSubmitting(false);
-    }
-  };
-
   // CLOSE ISSUE
   const handleCloseIssue = async (issueId: string) => {
     try {
@@ -1197,6 +1242,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                         const isExpanded = expandedTasks[task.id];
                         const canEditTask =
                           isCEO ||
+                          (currentUser?.roleDefinition?.rank ?? 99) <= 2 ||
                           (isProjectOwner && project.ownerId === currentUser?.id) ||
                           task.assigneeId === currentUser?.id;
 
@@ -1233,8 +1279,22 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
 
                                 {/* Meta: Assignee, Hours, Due date */}
                                 <div className="text-xs text-[#70675D] flex items-center gap-2 sm:gap-3 flex-wrap pt-0.5">
-                                  <span>
-                                    Assigned: <strong>{task.assignee?.name || 'Unassigned'}</strong>
+                                  <span className="inline-flex items-center gap-1.5 flex-wrap">
+                                    <span>Assigned:</span>
+                                    <strong className="text-[#231E1B]">{task.assignee?.name || 'Unassigned'}</strong>
+                                    {task.assignee && (
+                                      <span
+                                        className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                          (task.assignee.roleDefinition?.rank === 4 || task.assignee.role === 'Intern')
+                                            ? 'bg-[#F3E8FF] text-[#6B21A8] border border-[#E9D5FF]'
+                                            : (task.assignee.roleDefinition?.rank === 2 || task.assignee.role === 'CTO')
+                                            ? 'bg-[#EFF6FF] text-[#1E40AF] border border-[#BFDBFE]'
+                                            : 'bg-[#ECFDF5] text-[#065F46] border border-[#A7F3D0]'
+                                        }`}
+                                      >
+                                        {task.assignee.roleDefinition?.name || task.assignee.role}
+                                      </span>
+                                    )}
                                   </span>
                                   <span>&bull;</span>
                                   <span>
@@ -1420,12 +1480,79 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
               </div>
 
               <div className="p-3 rounded-xl bg-[#FAF7F0] space-y-1">
-                <span className="text-[#8C8275] uppercase font-bold text-[10px]">Active Members</span>
+                <span className="text-[#8C8275] uppercase font-bold text-[10px]">Team Size</span>
                 <p className="text-sm font-medium text-[#231E1B]">
-                  {project.memberships?.map((m) => m.user.name).join(', ') || 'None assigned'}
+                  {projectMembers.length} contributors ({projectMembers.filter((m) => m.isIntern).length} interns)
                 </p>
               </div>
             </div>
+          </div>
+
+          {/* Project Team & Intern Assignments */}
+          <div className="p-6 rounded-3xl bg-white border border-[#E8E2D5] space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <h3 className="font-serif text-lg font-bold text-[#231E1B] flex items-center gap-2">
+                  <Users className="w-5 h-5 text-[#C85A32]" />
+                  Project Team &amp; Intern Assignments ({projectMembers.length})
+                </h3>
+                <p className="text-xs text-[#70675D] mt-0.5">
+                  Authorized project contributors, designation badges, and active work assignments.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-[#F3E8FF] text-[#6B21A8] border border-[#E9D5FF]">
+                  {projectMembers.filter((m) => m.isIntern).length} Intern(s)
+                </span>
+                <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-[#ECFDF5] text-[#065F46] border border-[#A7F3D0]">
+                  {projectMembers.filter((m) => !m.isIntern).length} Staff
+                </span>
+              </div>
+            </div>
+
+            {projectMembers.length === 0 ? (
+              <p className="text-xs text-[#70675D] italic">No members or assignees recorded for this project.</p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {projectMembers.map((member) => (
+                  <div
+                    key={member.id}
+                    className="p-3.5 rounded-2xl bg-[#FAF8F3] border border-[#EBE4D5] flex items-start justify-between gap-2.5 shadow-2xs"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <img
+                        src={member.avatarUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(member.name)}`}
+                        alt={member.name}
+                        className="w-8 h-8 rounded-full border border-white shadow-2xs shrink-0"
+                      />
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-[#231E1B] truncate">{member.name}</div>
+                        <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                          <span
+                            className={`text-[9px] font-semibold px-2 py-0.5 rounded-full border ${
+                              member.isIntern
+                                ? 'bg-[#F3E8FF] text-[#6B21A8] border-[#E9D5FF]'
+                                : member.roleName === 'CTO' || member.roleName === 'CEO'
+                                ? 'bg-[#EFF6FF] text-[#1E40AF] border-[#BFDBFE]'
+                                : 'bg-[#ECFDF5] text-[#065F46] border-[#A7F3D0]'
+                            }`}
+                          >
+                            {member.roleName}
+                          </span>
+                          <span className="text-[10px] text-[#70675D]">{member.membershipType}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-xs font-semibold text-[#231E1B]">{member.taskCount} tasks</div>
+                      <div className="text-[10px] text-[#70675D]">
+                        {member.activeTaskCount} active
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Status Override History */}
@@ -1556,6 +1683,98 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                       })()}
                     </div>
                   </div>
+
+                  {/* Steps to Reproduce */}
+                  {issue.stepsToReproduce && (
+                    <div className="bg-[#FAF7F0] border border-[#EAE4D6] rounded-xl p-3 text-xs space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-[#8C6D58] uppercase text-[10px] tracking-wider">
+                          Steps to Reproduce
+                        </span>
+                        {issue.stepsToReproduce.length > 180 && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedSteps((prev) => ({
+                                ...prev,
+                                [issue.id]: !prev[issue.id],
+                              }))
+                            }
+                            className="text-[11px] font-semibold text-[#C85A32] hover:underline flex items-center gap-1 cursor-pointer"
+                          >
+                            {expandedSteps[issue.id] ? (
+                              <>
+                                <span>Show less</span>
+                                <ChevronUp className="w-3 h-3" />
+                              </>
+                            ) : (
+                              <>
+                                <span>Show all</span>
+                                <ChevronDown className="w-3 h-3" />
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
+                      <p
+                        className={`font-mono text-[12px] text-[#443E38] whitespace-pre-wrap leading-relaxed ${
+                          !expandedSteps[issue.id] && issue.stepsToReproduce.length > 180
+                            ? 'line-clamp-3'
+                            : ''
+                        }`}
+                      >
+                        {issue.stepsToReproduce}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Proof / Evidence Attachments */}
+                  {issue.attachments && issue.attachments.length > 0 && (
+                    <div className="space-y-1.5 pt-1">
+                      <span className="font-bold text-[#8C6D58] uppercase text-[10px] tracking-wider block">
+                        Proof / Evidence ({issue.attachments.length}):
+                      </span>
+                      <div className="flex flex-wrap gap-2">
+                        {issue.attachments.map((att) => {
+                          const isImg = att.fileType === 'IMAGE' || att.mimeType.startsWith('image/');
+                          return (
+                            <button
+                              key={att.id}
+                              type="button"
+                              onClick={() => setSelectedEvidence({ issueId: issue.id, attachment: att })}
+                              className="group flex items-center gap-2 px-2.5 py-1.5 rounded-xl border border-[#E8E2D5] bg-[#FAF8F5] hover:bg-[#F2EDE2] hover:border-[#C85A32]/60 cursor-pointer transition-all text-xs"
+                              title={`View or download ${att.fileName}`}
+                            >
+                              {isImg ? (
+                                <img
+                                  src={apiUrl(`/api/issues/${issue.id}/attachments/${att.id}`)}
+                                  alt={att.fileName}
+                                  className="w-7 h-7 rounded-md object-cover border border-[#DDD6C8] shrink-0"
+                                  onError={(e) => {
+                                    (e.target as HTMLElement).style.display = 'none';
+                                  }}
+                                />
+                              ) : att.fileName.endsWith('.pdf') ? (
+                                <FileText className="w-4 h-4 text-red-600 shrink-0" />
+                              ) : att.fileName.endsWith('.xls') || att.fileName.endsWith('.xlsx') ? (
+                                <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
+                              ) : (
+                                <Paperclip className="w-4 h-4 text-[#C85A32] shrink-0" />
+                              )}
+                              <div className="text-left">
+                                <span className="font-medium text-[#231E1B] truncate max-w-[130px] block group-hover:text-[#C85A32]">
+                                  {att.fileName}
+                                </span>
+                                <span className="text-[10px] text-[#8C8275]">
+                                  {(att.fileSize / 1024).toFixed(0)} KB &bull; Preview
+                                </span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
                   {issue.reopenComment && (
                     <div className="text-xs text-[#8C6D58] bg-[#FAF6EE] p-2 rounded-lg">
@@ -2029,84 +2248,20 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
       )}
 
       {/* MODAL: NEW ISSUE */}
-      {showNewIssueModal && (
-        <div 
-          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200"
-          onClick={() => setShowNewIssueModal(false)}
-        >
-          <div 
-            className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl border-t sm:border border-[#EAE3D5] space-y-4 max-h-[92vh] sm:max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="w-12 h-1.5 bg-[#DDD6C8] rounded-full mx-auto sm:hidden" />
-            <div className="flex items-center justify-between">
-              <h4 className="font-serif text-lg font-bold text-[#231E1B]">Raise Project Issue</h4>
-              <button
-                onClick={() => setShowNewIssueModal(false)}
-                className="p-2 text-gray-500 hover:text-black rounded-xl hover:bg-[#F5F1E8] min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateIssue} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-semibold text-[#231E1B] mb-1">
-                  Issue Title <span className="text-red-500">*</span>
-                </label>
-                <input
-                  required
-                  type="text"
-                  value={newIssueTitle}
-                  onChange={(e) => setNewIssueTitle(e.target.value)}
-                  placeholder="e.g. Critical valve failure in line 2"
-                  className="w-full p-2.5 rounded-xl border border-[#DDD6C8] text-sm min-h-[44px]"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-[#231E1B] mb-1">Severity</label>
-                <select
-                  value={newIssueSeverity}
-                  onChange={(e) => setNewIssueSeverity(e.target.value as any)}
-                  className="w-full p-2.5 rounded-xl border border-[#DDD6C8] text-sm min-h-[44px]"
-                >
-                  <option value="Minor">Minor</option>
-                  <option value="Major">Major</option>
-                  <option value="Critical">Critical (Forces project Off Track &amp; notifies CEO)</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-[#231E1B] mb-1">
-                  Detail / Context <span className="text-red-500">*</span>
-                </label>
-                <textarea
-                  required
-                  rows={3}
-                  value={newIssueDetail}
-                  onChange={(e) => setNewIssueDetail(e.target.value)}
-                  placeholder="Describe what happened and impact..."
-                  className="w-full p-2.5 rounded-xl border border-[#DDD6C8] text-sm"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2.5 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowNewIssueModal(false)}
-                  className="px-4 py-2.5 rounded-full text-xs font-semibold bg-[#F5F1E8] hover:bg-[#EAE4D6] min-h-[44px] cursor-pointer flex-1 sm:flex-none"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 rounded-full text-xs font-semibold bg-[#C85A32] text-white hover:bg-[#AD4722] min-h-[44px] shadow-xs cursor-pointer active:scale-95 flex-1 sm:flex-none"
-                >
-                  Raise Issue
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {showNewIssueModal && project && (
+        <RaiseIssueModal
+          isOpen={showNewIssueModal}
+          onClose={() => setShowNewIssueModal(false)}
+          onSuccess={(newIssue) => {
+            setProject((prev) =>
+              prev ? { ...prev, issues: [newIssue, ...(prev.issues || [])] } : prev
+            );
+            showToast('success', `Issue "${newIssue.title}" logged`);
+            fetchProject(false);
+          }}
+          projects={[{ id: project.id, name: project.name }]}
+          fixedProjectId={project.id}
+        />
       )}
 
       {/* MODAL: REOPEN ISSUE */}
@@ -2327,6 +2482,15 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* EVIDENCE VIEWER MODAL */}
+      {selectedEvidence && (
+        <IssueEvidenceViewer
+          issueId={selectedEvidence.issueId}
+          attachment={selectedEvidence.attachment}
+          onClose={() => setSelectedEvidence(null)}
+        />
       )}
     </div>
   );

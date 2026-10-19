@@ -1,4 +1,4 @@
-export type Role = 'Employee' | 'CTO' | 'CEO';
+export type Role = 'Employee' | 'CTO' | 'CEO' | 'Intern' | string;
 export type ProjectStatus = 'ON_TRACK' | 'AT_RISK' | 'OFF_TRACK';
 export type TaskState = 'Not started' | 'In progress' | 'Blocked' | 'Completed';
 export type TaskPriority = 'Low' | 'Normal' | 'High';
@@ -6,12 +6,33 @@ export type IssueSeverity = 'Minor' | 'Major' | 'Critical';
 export type IssueState = 'Open' | 'In progress' | 'Closed';
 export type RiskSeverity = 'Low' | 'Medium' | 'High';
 
+export interface RoleDefinition {
+  id: string;
+  name: string;
+  rank: number;
+  isExecutive: boolean;
+  canManageUsers: boolean;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  _count?: {
+    users: number;
+  };
+}
+
 export interface User {
   id: string;
   name: string;
   email: string;
   phone?: string | null;
   role: Role;
+  roleId?: string | null;
+  roleRank?: number;
+  isExecutive?: boolean;
+  canManageUsers?: boolean;
+  managerId?: string | null;
+  manager?: { id: string; name: string; role: Role; avatarUrl?: string | null } | null;
+  roleDefinition?: RoleDefinition | null;
   department: string | null;
   avatarUrl: string | null;
   isSignupCompleted?: boolean;
@@ -44,7 +65,13 @@ export interface Task {
   isBaselined: boolean;
   hasRiskFlag: boolean;
   riskFlagReason: string | null;
-  assignee?: { id: string; name: string; avatarUrl: string | null } | null;
+  assignee?: {
+    id: string;
+    name: string;
+    role?: string;
+    roleDefinition?: RoleDefinition | null;
+    avatarUrl: string | null;
+  } | null;
   qualityChecks?: QualityCheck[];
   blockingTask?: { id: string; title: string; state: TaskState } | null;
 }
@@ -70,6 +97,16 @@ export interface Milestone {
   isBaselined: boolean;
 }
 
+export interface IssueAttachment {
+  id: string;
+  issueId: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  fileType: 'IMAGE' | 'DOCUMENT' | string;
+  createdAt: string;
+}
+
 export interface Issue {
   id: string;
   projectId: string;
@@ -79,6 +116,7 @@ export interface Issue {
   state: IssueState;
   ownerId: string;
   detail: string;
+  stepsToReproduce?: string | null;
   raisedBy: string;
   raisedAt: string;
   closedAt: string | null;
@@ -87,6 +125,7 @@ export interface Issue {
   task?: { id: string; title: string } | null;
   owner?: { id: string; name: string; avatarUrl?: string | null };
   raiser?: { id: string; name: string; avatarUrl?: string | null };
+  attachments?: IssueAttachment[];
 }
 
 export interface Risk {
@@ -158,12 +197,24 @@ export interface Project {
 export interface WorkloadMember {
   user: User;
   referenceHours: number;
+  effectiveReferenceHours?: number;
+  leaveDeductionHours?: number;
   allocatedHours: number;
   workloadPercentage: number;
   status: 'OVER' | 'BALANCED' | 'AVAILABLE';
   statusLabel: string;
   projects: Array<{ id: string; name: string; hours: number }>;
   activeTasksCount: number;
+  approvedLeaves?: Array<{
+    id: string;
+    leaveType: string;
+    dayType: string;
+    startDate: string;
+    endDate: string;
+    reason?: string | null;
+  }>;
+  hasSchedulingConflict?: boolean;
+  schedulingConflicts?: string[];
 }
 
 export interface AlertItem {
@@ -445,10 +496,96 @@ export interface LeaveRequest {
     role: Role;
     department: string | null;
     avatarUrl: string | null;
+    roleDefinition?: { id: string; name: string; rank: number; isExecutive: boolean } | null;
   };
   reviewer?: {
     id: string;
     name: string;
     role: Role;
+    roleDefinition?: { id: string; name: string; rank: number; isExecutive: boolean } | null;
+  } | null;
+  designatedApprover?: {
+    id: string;
+    name: string;
+    role: string;
   } | null;
 }
+
+export interface DashboardMember {
+  id: string;
+  name: string;
+  email?: string;
+  role: string;
+  roleRank: number;
+  isExecutive: boolean;
+  isIntern: boolean;
+  membershipType: string;
+  avatarUrl?: string | null;
+  department?: string | null;
+  assignedTasksCount: number;
+  activeTasks: string[];
+}
+
+export interface DashboardProject {
+  id: string;
+  name: string;
+  goal: string;
+  status: ProjectStatus;
+  progress: number;
+  plan: number;
+  owner?: { id: string; name: string; email?: string; role?: string; avatarUrl?: string | null } | null;
+  totalTasksCount: number;
+  completedTasksCount: number;
+  activeTasksCount: number;
+  members: DashboardMember[];
+}
+
+export interface DashboardScope {
+  roleRank: number;
+  isExecutive: boolean;
+  canManageUsers: boolean;
+  isManager: boolean;
+  visibleProjectsCount: number;
+  visibleTeamCount: number;
+}
+
+export interface DashboardTaskDistribution {
+  total: number;
+  completed: number;
+  inProgress: number;
+  blocked: number;
+  notStarted: number;
+}
+
+export interface DashboardSubordinateTask {
+  id: string;
+  title: string;
+  state: TaskState;
+  priority: TaskPriority;
+  plannedEnd: string;
+  plannedHours: number;
+  assignee?: {
+    id: string;
+    name: string;
+    role: string;
+    roleDefinition?: { id: string; name: string; rank: number; isExecutive: boolean } | null;
+    avatarUrl?: string | null;
+  } | null;
+}
+
+export interface DashboardWorkloadMetrics {
+  teamDistribution: {
+    totalTeam: number;
+    overallocatedCount: number;
+    balancedCount: number;
+    availableCount: number;
+  } | null;
+  myWorkload: {
+    allocatedHours: number;
+    referenceHours: number;
+    percentage: number;
+    status: string;
+    statusLabel: string;
+  };
+}
+

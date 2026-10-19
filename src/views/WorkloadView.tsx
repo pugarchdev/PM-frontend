@@ -47,6 +47,13 @@ export const WorkloadView: React.FC = () => {
       overallocatedCount: number;
       balancedCount: number;
       availableCount: number;
+      teamOnLeaveCount?: number;
+      schedulingConflictsCount?: number;
+    };
+    scope?: {
+      isExecutive: boolean;
+      subordinatesCount: number;
+      visibleUserCount: number;
     };
     workload: WorkloadMember[];
   } | null>(null);
@@ -63,10 +70,11 @@ export const WorkloadView: React.FC = () => {
   const [allocateHours, setAllocateHours] = useState(10);
   const [toast, setToast] = useState<string | null>(null);
 
-  // Leave request
+  // Leave request & designated approver
   const [myLeave, setMyLeave] = useState<LeaveRequest[]>([]);
   const [leaveLoading, setLeaveLoading] = useState(false);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [designatedApprover, setDesignatedApprover] = useState<{ id: string; name: string; role: string } | null>(null);
   const [leaveForm, setLeaveForm] = useState({
     startDate: '',
     endDate: '',
@@ -103,10 +111,10 @@ export const WorkloadView: React.FC = () => {
   };
 
   const fetchMyLeave = async () => {
-    if (!currentUser || isCEO) return;
+    if (!currentUser) return;
     try {
       setLeaveLoading(true);
-      const res = await apiFetch('/api/leave');
+      const res = await apiFetch('/api/leave?scope=mine');
       if (res.ok) {
         const data = await res.json();
         setMyLeave(data);
@@ -118,9 +126,23 @@ export const WorkloadView: React.FC = () => {
     }
   };
 
+  const fetchApprover = async () => {
+    if (!currentUser) return;
+    try {
+      const res = await apiFetch('/api/leave/approver');
+      if (res.ok) {
+        const json = await res.json();
+        setDesignatedApprover(json.approver);
+      }
+    } catch {
+      // silent
+    }
+  };
+
   useEffect(() => {
     fetchWorkload();
     fetchMyLeave();
+    fetchApprover();
   }, [currentUser]);
 
   const [allocating, setAllocating] = useState(false);
@@ -226,19 +248,17 @@ export const WorkloadView: React.FC = () => {
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          {/* Request Leave button — only for Employee / Project Owner */}
-          {!isCEO && (
-            <button
-              id="btn-request-leave"
-              onClick={() => setShowLeaveModal(true)}
-              className="px-3.5 py-2 rounded-full bg-[#C85A32] hover:bg-[#AD4722] text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer min-h-[36px] sm:min-h-[44px]"
-              title="Request Leave"
-            >
-              <Plane className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Request Leave</span>
-              <span className="sm:hidden">Leave</span>
-            </button>
-          )}
+          {/* Request Leave button */}
+          <button
+            id="btn-request-leave"
+            onClick={() => setShowLeaveModal(true)}
+            className="px-3.5 py-2 rounded-full bg-[#C85A32] hover:bg-[#AD4722] text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer min-h-[36px] sm:min-h-[44px]"
+            title="Request Leave"
+          >
+            <Plane className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Request Leave</span>
+            <span className="sm:hidden">Leave</span>
+          </button>
           {/* Pre-Register User button — CEO only */}
           {isCEO && (
             <button
@@ -260,9 +280,8 @@ export const WorkloadView: React.FC = () => {
         </div>
       </div>
 
-      {/* MY LEAVE — visible to Employee / Project Owner */}
-      {!isCEO && (
-        <div className="bg-white border border-[#EAE3D5] rounded-2xl shadow-xs overflow-hidden">
+      {/* MY LEAVE — visible to all users */}
+      <div className="bg-white border border-[#EAE3D5] rounded-2xl shadow-xs overflow-hidden">
           <button
             onClick={() => setShowMyLeave(!showMyLeave)}
             className="w-full flex items-center justify-between px-4 sm:px-5 py-3.5 cursor-pointer hover:bg-[#FAF8F4] transition-colors"
@@ -370,51 +389,131 @@ export const WorkloadView: React.FC = () => {
             </div>
           )}
         </div>
-      )}
 
       {/* Summary KPI cards */}
       {data?.summary && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3.5">
-          <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-[#EAE3D5] shadow-xs flex flex-col justify-between">
-            <span className="text-[10px] sm:text-xs uppercase font-bold text-[#70675D] tracking-wider block truncate">
-              Active Team
-            </span>
-            <div className="mt-1 text-xl sm:text-2xl font-bold font-serif text-[#231E1B]">
-              {data.summary.totalTeam}
+        !isCEO && data?.scope && !data.scope.isExecutive && data.scope.subordinatesCount === 0 ? (
+          /* Personal Capacity Strip for Individual Contributors (Employees / Interns) */
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3.5">
+            <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-[#EAE3D5] shadow-xs flex flex-col justify-between">
+              <span className="text-[10px] sm:text-xs uppercase font-bold text-[#70675D] tracking-wider block truncate">
+                Your Allocated Load
+              </span>
+              <div className="mt-1 text-xl sm:text-2xl font-bold font-serif text-[#231E1B]">
+                {data.workload[0]?.allocatedHours ?? 0} hrs
+              </div>
+              <span className="text-[10px] sm:text-[11px] text-[#70675D] truncate">
+                {data.workload[0]?.workloadPercentage ?? 0}% capacity
+              </span>
             </div>
-            <span className="text-[10px] sm:text-[11px] text-[#70675D] truncate">Staff members</span>
-          </div>
 
-          <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-[#FECACA] shadow-xs flex flex-col justify-between">
-            <span className="text-[10px] sm:text-xs uppercase font-bold text-[#991B1B] tracking-wider block truncate">
-              Overallocated
-            </span>
-            <div className="mt-1 text-xl sm:text-2xl font-bold font-serif text-[#991B1B]">
-              {data.summary.overallocatedCount}
+            <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-[#EAE3D5] shadow-xs flex flex-col justify-between">
+              <span className="text-[10px] sm:text-xs uppercase font-bold text-[#70675D] tracking-wider block truncate">
+                Weekly Reference
+              </span>
+              <div className="mt-1 text-xl sm:text-2xl font-bold font-serif text-[#231E1B]">
+                37 hrs
+              </div>
+              <span className="text-[10px] sm:text-[11px] text-[#70675D] truncate">Full-time standard</span>
             </div>
-            <span className="text-[10px] sm:text-[11px] text-[#991B1B] truncate">&gt; 100% capacity</span>
-          </div>
 
-          <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-[#FDE68A] shadow-xs flex flex-col justify-between">
-            <span className="text-[10px] sm:text-xs uppercase font-bold text-[#92400E] tracking-wider block truncate">
-              Balanced
-            </span>
-            <div className="mt-1 text-xl sm:text-2xl font-bold font-serif text-[#92400E]">
-              {data.summary.balancedCount}
+            <div className={`p-3.5 sm:p-4 rounded-2xl bg-white border shadow-xs flex flex-col justify-between ${
+              data.workload[0]?.status === 'OVER'
+                ? 'border-[#FECACA]'
+                : data.workload[0]?.status === 'BALANCED'
+                ? 'border-[#FDE68A]'
+                : 'border-[#C6DEC7]'
+            }`}>
+              <span className="text-[10px] sm:text-xs uppercase font-bold tracking-wider block truncate text-[#70675D]">
+                Capacity Status
+              </span>
+              <div className={`mt-1 text-xl sm:text-2xl font-bold font-serif ${
+                data.workload[0]?.status === 'OVER'
+                  ? 'text-[#991B1B]'
+                  : data.workload[0]?.status === 'BALANCED'
+                  ? 'text-[#92400E]'
+                  : 'text-[#2D5A34]'
+              }`}>
+                {data.workload[0]?.statusLabel ?? 'Available'}
+              </div>
+              <span className="text-[10px] sm:text-[11px] text-[#70675D] truncate">Standard reference</span>
             </div>
-            <span className="text-[10px] sm:text-[11px] text-[#92400E] truncate">70% – 100% load</span>
-          </div>
 
-          <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-[#C6DEC7] shadow-xs flex flex-col justify-between">
-            <span className="text-[10px] sm:text-xs uppercase font-bold text-[#2D5A34] tracking-wider block truncate">
-              Available
-            </span>
-            <div className="mt-1 text-xl sm:text-2xl font-bold font-serif text-[#2D5A34]">
-              {data.summary.availableCount}
+            <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-[#EAE3D5] shadow-xs flex flex-col justify-between">
+              <span className="text-[10px] sm:text-xs uppercase font-bold text-[#70675D] tracking-wider block truncate">
+                Active Tasks
+              </span>
+              <div className="mt-1 text-xl sm:text-2xl font-bold font-serif text-[#231E1B]">
+                {data.workload[0]?.activeTasksCount ?? 0}
+              </div>
+              <span className="text-[10px] sm:text-[11px] text-[#70675D] truncate">
+                In authorized projects
+              </span>
             </div>
-            <span className="text-[10px] sm:text-[11px] text-[#2D5A34] truncate">&lt; 70% capacity</span>
           </div>
-        </div>
+        ) : (
+          /* Team Workload Summary Strip for CEO and Managers */
+          <div className="space-y-2.5">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3.5">
+              <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-[#EAE3D5] shadow-xs flex flex-col justify-between">
+                <span className="text-[10px] sm:text-xs uppercase font-bold text-[#70675D] tracking-wider block truncate">
+                  Active Team
+                </span>
+                <div className="mt-1 text-xl sm:text-2xl font-bold font-serif text-[#231E1B]">
+                  {data.summary.totalTeam}
+                </div>
+                <span className="text-[10px] sm:text-[11px] text-[#70675D] truncate">Staff members</span>
+              </div>
+
+              <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-[#FECACA] shadow-xs flex flex-col justify-between">
+                <span className="text-[10px] sm:text-xs uppercase font-bold text-[#991B1B] tracking-wider block truncate">
+                  Overallocated
+                </span>
+                <div className="mt-1 text-xl sm:text-2xl font-bold font-serif text-[#991B1B]">
+                  {data.summary.overallocatedCount}
+                </div>
+                <span className="text-[10px] sm:text-[11px] text-[#991B1B] truncate">&gt; 100% capacity</span>
+              </div>
+
+              <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-[#FDE68A] shadow-xs flex flex-col justify-between">
+                <span className="text-[10px] sm:text-xs uppercase font-bold text-[#92400E] tracking-wider block truncate">
+                  Balanced
+                </span>
+                <div className="mt-1 text-xl sm:text-2xl font-bold font-serif text-[#92400E]">
+                  {data.summary.balancedCount}
+                </div>
+                <span className="text-[10px] sm:text-[11px] text-[#92400E] truncate">70% – 100% load</span>
+              </div>
+
+              <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-[#C6DEC7] shadow-xs flex flex-col justify-between">
+                <span className="text-[10px] sm:text-xs uppercase font-bold text-[#2D5A34] tracking-wider block truncate">
+                  Available
+                </span>
+                <div className="mt-1 text-xl sm:text-2xl font-bold font-serif text-[#2D5A34]">
+                  {data.summary.availableCount}
+                </div>
+                <span className="text-[10px] sm:text-[11px] text-[#2D5A34] truncate">&lt; 70% capacity</span>
+              </div>
+            </div>
+
+            {(data.summary.teamOnLeaveCount !== undefined && (data.summary.teamOnLeaveCount > 0 || (data.summary.schedulingConflictsCount ?? 0) > 0)) && (
+              <div className="flex flex-wrap items-center gap-2.5 p-3 bg-white border border-[#EAE3D5] rounded-2xl shadow-xs text-xs">
+                {data.summary.teamOnLeaveCount > 0 && (
+                  <span className="flex items-center gap-1.5 font-semibold text-[#2D5A34] bg-[#EBF2EB] px-3 py-1 rounded-xl border border-[#C6DEC7]">
+                    <Plane className="w-3.5 h-3.5 text-[#2D5A34]" />
+                    {data.summary.teamOnLeaveCount} member(s) with approved leave this week
+                  </span>
+                )}
+                {(data.summary.schedulingConflictsCount ?? 0) > 0 && (
+                  <span className="flex items-center gap-1.5 font-semibold text-[#991B1B] bg-[#FEE2E2] px-3 py-1 rounded-xl border border-[#FECACA]">
+                    <AlertTriangle className="w-3.5 h-3.5 text-[#991B1B]" />
+                    {data.summary.schedulingConflictsCount} scheduling conflict(s) detected with active tasks
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        )
       )}
 
       {/* Loading */}
@@ -477,9 +576,22 @@ export const WorkloadView: React.FC = () => {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <h4 className="font-bold text-xs sm:text-sm text-[#231E1B] truncate">{member.user.name}</h4>
-                        <span className="text-[10px] text-[#70675D] bg-[#F5F1E8] px-2 py-0.5 rounded-full">
-                          {member.user.department || member.user.role}
+                        <span
+                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                            member.user.role === 'Intern'
+                              ? 'bg-[#F3E8FF] text-[#6B21A8] border-[#E9D5FF]'
+                              : member.user.role === 'CTO' || member.user.role === 'CEO'
+                              ? 'bg-[#EFF6FF] text-[#1E40AF] border-[#BFDBFE]'
+                              : 'bg-[#ECFDF5] text-[#065F46] border-[#A7F3D0]'
+                          }`}
+                        >
+                          {member.user.role}
                         </span>
+                        {member.user.department && (
+                          <span className="text-[10px] text-[#70675D] bg-[#F5F1E8] px-2 py-0.5 rounded-full">
+                            {member.user.department}
+                          </span>
+                        )}
                       </div>
                       <div className="text-[11px] text-[#70675D] truncate">{member.user.email}</div>
                     </div>
@@ -506,6 +618,36 @@ export const WorkloadView: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Approved Leave Badge */}
+                {member.approvedLeaves && member.approvedLeaves.length > 0 && (
+                  <div className="flex items-center gap-2 text-[11px] font-semibold text-[#2D5A34] bg-[#EBF2EB] border border-[#C6DEC7] px-3 py-1.5 rounded-xl">
+                    <Plane className="w-3.5 h-3.5 text-[#2D5A34] shrink-0" />
+                    <span className="truncate">
+                      Approved Absence: {member.approvedLeaves.map((l) => `${l.leaveType} (${fmt(l.startDate)}${l.startDate !== l.endDate ? ` – ${fmt(l.endDate)}` : ''})`).join(', ')}
+                    </span>
+                    {member.leaveDeductionHours ? (
+                      <span className="shrink-0 text-[10px] bg-white/80 text-[#2D5A34] font-bold px-1.5 py-0.5 rounded-md">
+                        -{member.leaveDeductionHours}h load deduction
+                      </span>
+                    ) : null}
+                  </div>
+                )}
+
+                {/* Scheduling Conflicts Alert */}
+                {member.hasSchedulingConflict && member.schedulingConflicts && member.schedulingConflicts.length > 0 && (
+                  <div className="flex items-start gap-2 text-[11px] text-[#991B1B] bg-[#FEE2E2] border border-[#FECACA] px-3 py-2 rounded-xl">
+                    <AlertTriangle className="w-4 h-4 text-[#991B1B] shrink-0 mt-0.5" />
+                    <div className="space-y-0.5">
+                      <span className="font-bold">Workload / Scheduling Conflict:</span>
+                      <ul className="list-disc list-inside space-y-0.5 text-[10px] sm:text-[11px]">
+                        {member.schedulingConflicts.map((c, i) => (
+                          <li key={i}>{c}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                )}
+
                 {/* Progress Visual Bar */}
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between text-xs">
@@ -513,7 +655,12 @@ export const WorkloadView: React.FC = () => {
                       {member.allocatedHours} hrs allocated
                     </span>
                     <span className="text-[#70675D]">
-                      Ref: <strong>{member.referenceHours} hrs / wk</strong>
+                      Ref: <strong>{member.effectiveReferenceHours ?? member.referenceHours} hrs / wk</strong>
+                      {member.leaveDeductionHours ? (
+                        <span className="text-[10px] text-[#2D5A34] ml-1 font-semibold">
+                          (-{member.leaveDeductionHours}h approved leave)
+                        </span>
+                      ) : null}
                     </span>
                   </div>
 
@@ -654,7 +801,11 @@ export const WorkloadView: React.FC = () => {
                   <Plane className="w-5 h-5 text-[#C85A32]" />
                   Request Leave
                 </h4>
-                <p className="text-xs text-[#70685F] mt-0.5">Submit a leave request for CEO approval.</p>
+                <p className="text-xs text-[#70685F] mt-0.5">
+                  {designatedApprover
+                    ? `Designated Approver: ${designatedApprover.name} (${designatedApprover.role})`
+                    : 'Submit leave request through the organizational reporting hierarchy.'}
+                </p>
               </div>
               <button
                 onClick={() => setShowLeaveModal(false)}
@@ -663,6 +814,15 @@ export const WorkloadView: React.FC = () => {
                 <X className="w-5 h-5" />
               </button>
             </div>
+
+            {designatedApprover && (
+              <div className="bg-[#FAF8F4] border border-[#EDE7DC] rounded-xl p-2.5 text-xs text-[#70685F] flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-[#2D5A34] shrink-0" />
+                <span>
+                  Your request will be routed directly to your manager <strong>{designatedApprover.name}</strong> ({designatedApprover.role}).
+                </span>
+              </div>
+            )}
 
             <form onSubmit={handleLeaveSubmit} className="space-y-3.5">
               {/* Leave Type */}

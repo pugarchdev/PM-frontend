@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext.tsx';
-import { apiFetch } from '../lib/api.ts';
-import { Issue, Project } from '../types.ts';
+import { apiFetch, apiUrl } from '../lib/api.ts';
+import { Issue, Project, IssueAttachment } from '../types.ts';
 import { SeverityBadge } from '../components/StatusBadge.tsx';
+import { RaiseIssueModal } from '../components/RaiseIssueModal.tsx';
+import { IssueEvidenceViewer } from '../components/IssueEvidenceViewer.tsx';
 import {
   AlertCircle,
   Plus,
@@ -13,6 +15,13 @@ import {
   ArrowRight,
   X,
   Search,
+  Paperclip,
+  FileText,
+  FileSpreadsheet,
+  FileImage,
+  File as FileIcon,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 
 interface IssuesViewProps {
@@ -40,14 +49,14 @@ export const IssuesView: React.FC<IssuesViewProps> = ({ onSelectProject }) => {
 
   // Modals & Toast
   const [showRaiseModal, setShowRaiseModal] = useState(false);
-  const [newProjectId, setNewProjectId] = useState('');
-  const [newTitle, setNewTitle] = useState('');
-  const [newSeverity, setNewSeverity] = useState<'Minor' | 'Major' | 'Critical'>('Major');
-  const [newDetail, setNewDetail] = useState('');
+  const [selectedEvidence, setSelectedEvidence] = useState<{ issueId: string; attachment: IssueAttachment } | null>(null);
+  const [expandedSteps, setExpandedSteps] = useState<Record<string, boolean>>({});
 
   const [showReopenModal, setShowReopenModal] = useState(false);
   const [reopenIssueId, setReopenIssueId] = useState<string | null>(null);
   const [reopenComment, setReopenComment] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
 
   const [toastMessage, setToastMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
 
@@ -75,9 +84,6 @@ export const IssuesView: React.FC<IssuesViewProps> = ({ onSelectProject }) => {
 
       setIssues(issuesData);
       setProjects(projectsData);
-      if (projectsData.length > 0 && !newProjectId) {
-        setNewProjectId(projectsData[0].id);
-      }
     } catch (err: any) {
       setError(err.message || 'Error loading issues');
     } finally {
@@ -88,46 +94,6 @@ export const IssuesView: React.FC<IssuesViewProps> = ({ onSelectProject }) => {
   useEffect(() => {
     fetchData();
   }, [currentUser]);
-
-  const [submitting, setSubmitting] = useState(false);
-  const submittingRef = useRef(false);
-
-  const handleRaiseIssue = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTitle.trim() || !newDetail.trim() || !newProjectId) {
-      showToast('error', 'All fields are required to raise an issue');
-      return;
-    }
-    if (submittingRef.current || submitting) return;
-    submittingRef.current = true;
-    setSubmitting(true);
-
-    try {
-      const res = await apiFetch('/api/issues', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          projectId: newProjectId,
-          title: newTitle.trim(),
-          severity: newSeverity,
-          detail: newDetail.trim(),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to raise issue');
-
-      showToast('success', `Issue "${newTitle}" registered.`);
-      setShowRaiseModal(false);
-      setNewTitle('');
-      setNewDetail('');
-      fetchData();
-    } catch (err: any) {
-      showToast('error', err.message);
-    } finally {
-      submittingRef.current = false;
-      setSubmitting(false);
-    }
-  };
 
   const handleCloseIssue = async (issueId: string) => {
     try {
@@ -516,6 +482,98 @@ export const IssuesView: React.FC<IssuesViewProps> = ({ onSelectProject }) => {
                   </div>
                 </div>
 
+                {/* Steps to Reproduce */}
+                {issue.stepsToReproduce && (
+                  <div className="bg-[#FAF7F0] border border-[#EAE4D6] rounded-xl p-3 text-xs space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-[#8C6D58] uppercase text-[10px] tracking-wider">
+                        Steps to Reproduce
+                      </span>
+                      {issue.stepsToReproduce.length > 180 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedSteps((prev) => ({
+                              ...prev,
+                              [issue.id]: !prev[issue.id],
+                            }))
+                          }
+                          className="text-[11px] font-semibold text-[#C85A32] hover:underline flex items-center gap-1 cursor-pointer"
+                        >
+                          {expandedSteps[issue.id] ? (
+                            <>
+                              <span>Show less</span>
+                              <ChevronUp className="w-3 h-3" />
+                            </>
+                          ) : (
+                            <>
+                              <span>Show all</span>
+                              <ChevronDown className="w-3 h-3" />
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                    <p
+                      className={`font-mono text-[12px] text-[#443E38] whitespace-pre-wrap leading-relaxed ${
+                        !expandedSteps[issue.id] && issue.stepsToReproduce.length > 180
+                          ? 'line-clamp-3'
+                          : ''
+                      }`}
+                    >
+                      {issue.stepsToReproduce}
+                    </p>
+                  </div>
+                )}
+
+                {/* Proof / Evidence Attachments */}
+                {issue.attachments && issue.attachments.length > 0 && (
+                  <div className="space-y-1.5 pt-1">
+                    <span className="font-bold text-[#8C6D58] uppercase text-[10px] tracking-wider block">
+                      Proof / Evidence ({issue.attachments.length}):
+                    </span>
+                    <div className="flex flex-wrap gap-2">
+                      {issue.attachments.map((att) => {
+                        const isImg = att.fileType === 'IMAGE' || att.mimeType.startsWith('image/');
+                        return (
+                          <button
+                            key={att.id}
+                            type="button"
+                            onClick={() => setSelectedEvidence({ issueId: issue.id, attachment: att })}
+                            className="group flex items-center gap-2 px-2.5 py-1.5 rounded-xl border border-[#E8E2D5] bg-[#FAF8F5] hover:bg-[#F2EDE2] hover:border-[#C85A32]/60 cursor-pointer transition-all text-xs"
+                            title={`View or download ${att.fileName}`}
+                          >
+                            {isImg ? (
+                              <img
+                                src={apiUrl(`/api/issues/${issue.id}/attachments/${att.id}`)}
+                                alt={att.fileName}
+                                className="w-7 h-7 rounded-md object-cover border border-[#DDD6C8] shrink-0"
+                                onError={(e) => {
+                                  (e.target as HTMLElement).style.display = 'none';
+                                }}
+                              />
+                            ) : att.fileName.endsWith('.pdf') ? (
+                              <FileText className="w-4 h-4 text-red-600 shrink-0" />
+                            ) : att.fileName.endsWith('.xls') || att.fileName.endsWith('.xlsx') ? (
+                              <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
+                            ) : (
+                              <Paperclip className="w-4 h-4 text-[#C85A32] shrink-0" />
+                            )}
+                            <div className="text-left">
+                              <span className="font-medium text-[#231E1B] truncate max-w-[130px] block group-hover:text-[#C85A32]">
+                                {att.fileName}
+                              </span>
+                              <span className="text-[10px] text-[#8C8275]">
+                                {(att.fileSize / 1024).toFixed(0)} KB &bull; Preview
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {issue.reopenComment && (
                   <div className="text-xs text-[#8C6D58] bg-[#FAF6EE] p-2.5 rounded-xl border border-[#EFECE4]">
                     <strong>Reopened with reason:</strong> {issue.reopenComment}
@@ -541,104 +599,24 @@ export const IssuesView: React.FC<IssuesViewProps> = ({ onSelectProject }) => {
       )}
 
       {/* RAISE ISSUE MODAL */}
-      {showRaiseModal && (
-        <div 
-          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200"
-          onClick={() => setShowRaiseModal(false)}
-        >
-          <div 
-            className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl border-t sm:border border-[#EAE3D5] space-y-4 max-h-[92vh] sm:max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="w-12 h-1.5 bg-[#DDD6C8] rounded-full mx-auto sm:hidden" />
-            <div className="flex items-center justify-between">
-              <h4 className="font-serif text-lg font-bold text-[#231E1B]">Raise New Issue</h4>
-              <button 
-                onClick={() => setShowRaiseModal(false)} 
-                className="p-2 text-gray-400 hover:text-black rounded-xl hover:bg-[#F5F1E8] min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      <RaiseIssueModal
+        isOpen={showRaiseModal}
+        onClose={() => setShowRaiseModal(false)}
+        onSuccess={(newIssue) => {
+          showToast('success', `Issue "${newIssue.title}" registered successfully.`);
+          fetchData();
+        }}
+        projects={projects}
+        initialProjectId={selectedProjectId !== 'ALL' ? selectedProjectId : undefined}
+      />
 
-            <form onSubmit={handleRaiseIssue} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-semibold text-[#231E1B] mb-1">
-                  Project <span className="text-red-500">*</span>
-                </label>
-                <select
-                  required
-                  value={newProjectId}
-                  onChange={(e) => setNewProjectId(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-[#DDD6C8] text-sm min-h-[44px]"
-                >
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[#231E1B] mb-1">
-                  Issue Title <span className="text-red-500">*</span>
-                </label>
-                <input
-                  required
-                  type="text"
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  placeholder="e.g. Critical boiler pressure sensor failure"
-                  className="w-full p-2.5 rounded-xl border border-[#DDD6C8] text-sm min-h-[44px]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[#231E1B] mb-1">Severity</label>
-                <select
-                  value={newSeverity}
-                  onChange={(e) => setNewSeverity(e.target.value as any)}
-                  className="w-full p-2.5 rounded-xl border border-[#DDD6C8] text-sm min-h-[44px]"
-                >
-                  <option value="Minor">Minor</option>
-                  <option value="Major">Major</option>
-                  <option value="Critical">Critical (Forces project Off Track &amp; notifies CEO)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[#231E1B] mb-1">
-                  Detailed Context <span className="text-red-500">*</span>
-                </label>
-                <textarea
-                  required
-                  rows={3}
-                  value={newDetail}
-                  onChange={(e) => setNewDetail(e.target.value)}
-                  placeholder="Describe the issue, what occurred, and the immediate operational consequence..."
-                  className="w-full p-2.5 rounded-xl border border-[#DDD6C8] text-sm"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2.5 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowRaiseModal(false)}
-                  className="px-4 py-2.5 rounded-full text-xs font-semibold bg-[#F5F1E8] hover:bg-[#EAE4D6] min-h-[44px] cursor-pointer flex-1 sm:flex-none"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 rounded-full text-xs font-semibold bg-[#C85A32] text-white hover:bg-[#AD4722] min-h-[44px] shadow-xs cursor-pointer active:scale-95 flex-1 sm:flex-none"
-                >
-                  Raise Issue
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {/* EVIDENCE VIEWER LIGHTBOX MODAL */}
+      {selectedEvidence && (
+        <IssueEvidenceViewer
+          issueId={selectedEvidence.issueId}
+          attachment={selectedEvidence.attachment}
+          onClose={() => setSelectedEvidence(null)}
+        />
       )}
 
       {/* REOPEN ISSUE MODAL */}

@@ -23,10 +23,24 @@ interface ManagedUser {
   email: string;
   phone?: string | null;
   role: string;
+  roleId?: string | null;
+  roleRank?: number;
+  isExecutive?: boolean;
+  canManageUsers?: boolean;
+  managerId?: string | null;
+  manager?: { id: string; name: string; role: string } | null;
+  roleDefinition?: { id: string; name: string; rank: number; isExecutive: boolean } | null;
   department?: string | null;
   avatarUrl?: string | null;
   isSignupCompleted: boolean;
   createdAt?: string;
+}
+
+interface RoleOption {
+  id: string;
+  name: string;
+  rank: number;
+  isExecutive: boolean;
 }
 
 interface UserManagementModalProps {
@@ -38,6 +52,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
   const { preRegisterUser } = useAuth();
   const [activeTab, setActiveTab] = useState<'list' | 'create'>('list');
   const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [roles, setRoles] = useState<RoleOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -48,7 +63,8 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
   const [formEmail, setFormEmail] = useState('');
   const [formPhone, setFormPhone] = useState('');
   const [formDept, setFormDept] = useState('Operations');
-  const [formRole, setFormRole] = useState<'Employee' | 'CTO'>('Employee');
+  const [formRoleId, setFormRoleId] = useState<string>('');
+  const [formManagerId, setFormManagerId] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -64,6 +80,16 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
       }
       const data = await res.json();
       setUsers(data);
+
+      const rolesRes = await apiFetch('/api/roles');
+      if (rolesRes.ok) {
+        const rolesData = await rolesRes.json();
+        setRoles(rolesData);
+        if (rolesData.length > 0 && !formRoleId) {
+          const defaultRole = rolesData.find((r: any) => r.name === 'Employee') || rolesData[rolesData.length - 1];
+          setFormRoleId(defaultRole.id);
+        }
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to fetch users');
     } finally {
@@ -91,12 +117,15 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
 
     setSubmitting(true);
     try {
+      const selectedRole = roles.find((r) => r.id === formRoleId);
       const res = await preRegisterUser({
         name: formName.trim(),
         email: formEmail.trim(),
         phone: formPhone.trim(),
         department: formDept.trim(),
-        role: formRole,
+        role: selectedRole?.name || 'Employee',
+        roleId: formRoleId || undefined,
+        managerId: formManagerId || undefined,
       });
 
       if (!res.success) {
@@ -280,16 +309,21 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-xs font-bold text-[#231E1B] truncate">{u.name}</span>
                             <span
-                              className={`text-[10px] px-2 py-0.2 rounded-full font-semibold ${
-                                u.role === 'CEO'
+                              className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                                u.roleDefinition?.isExecutive || u.role === 'CEO'
                                   ? 'bg-[#FBE8E2] text-[#A63C1E] border border-[#F3CEC1]'
-                                  : u.role === 'CTO'
+                                  : (u.roleRank ?? 3) <= 2
                                   ? 'bg-[#EBF2EB] text-[#2D5A34] border border-[#C6DEC7]'
                                   : 'bg-[#EFECE4] text-[#554E45] border border-[#DDD6C8]'
                               }`}
                             >
-                              {u.role === 'CTO' ? 'CTO' : u.role}
+                              {u.roleDefinition?.name || u.role}
                             </span>
+                            {u.manager && (
+                              <span className="text-[10px] text-[#70685F] italic">
+                                Reports to: {u.manager.name} ({u.manager.role})
+                              </span>
+                            )}
                           </div>
 
                           <div className="flex items-center gap-3 text-[11px] text-[#70685F] flex-wrap">
@@ -416,17 +450,40 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
 
                 <div>
                   <label className="block text-xs font-semibold text-[#231E1B] mb-1">
-                    Pre-Assigned Role
+                    Assigned Role
                   </label>
                   <select
-                    value={formRole}
-                    onChange={(e) => setFormRole(e.target.value as any)}
+                    value={formRoleId}
+                    onChange={(e) => setFormRoleId(e.target.value)}
                     className="w-full px-3 py-2.5 rounded-xl border border-[#DDD6C8] bg-white text-xs text-[#231E1B] focus:outline-hidden focus:border-[#C85A32] min-h-[44px]"
                   >
-                    <option value="Employee">Employee</option>
-                    <option value="CTO">CTO</option>
+                    {roles.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name} (Rank {r.rank}{r.isExecutive ? ' • Executive' : ''})
+                      </option>
+                    ))}
                   </select>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[#231E1B] mb-1">
+                  Reporting Manager
+                </label>
+                <select
+                  value={formManagerId}
+                  onChange={(e) => setFormManagerId(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl border border-[#DDD6C8] bg-white text-xs text-[#231E1B] focus:outline-hidden focus:border-[#C85A32] min-h-[44px]"
+                >
+                  <option value="">None (Top-Level / Self-Managed)</option>
+                  {users
+                    .filter((u) => u.isSignupCompleted)
+                    .map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name} — {u.role} ({u.email})
+                      </option>
+                    ))}
+                </select>
               </div>
 
               <div className="pt-2">

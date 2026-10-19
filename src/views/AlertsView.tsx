@@ -1,8 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { apiFetch } from '../lib/api.ts';
-import { AlertItem, LeaveRequest } from '../types.ts';
-import { StatusBadge, SeverityBadge } from '../components/StatusBadge.tsx';
+import {
+  AlertItem,
+  LeaveRequest,
+  DashboardScope,
+  DashboardProject,
+  DashboardTaskDistribution,
+  DashboardSubordinateTask,
+  DashboardWorkloadMetrics,
+} from '../types.ts';
+import { StatusBadge, SeverityBadge, PriorityBadge } from '../components/StatusBadge.tsx';
 import {
   AlertTriangle,
   AlertOctagon,
@@ -17,10 +25,16 @@ import {
   Calendar,
   Plane,
   ChevronDown,
+  ChevronRight,
   X,
   CheckCheck,
   RotateCcw,
   Ban,
+  Users,
+  Briefcase,
+  TrendingUp,
+  Activity,
+  BarChart2,
 } from 'lucide-react';
 
 const leaveStatusStyle = (status: string) => {
@@ -45,6 +59,11 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onSelectProject, onShowC
   const { currentUser, isCEO } = useAuth();
   const [data, setData] = useState<{
     summary: any;
+    dashboardScope?: DashboardScope;
+    dashboardProjects?: DashboardProject[];
+    taskDistribution?: DashboardTaskDistribution;
+    subordinateTasks?: DashboardSubordinateTask[];
+    workloadMetrics?: DashboardWorkloadMetrics;
     groupedByProject: Record<string, { projectName: string; alerts: AlertItem[] }>;
     alerts: AlertItem[];
     myTasks: any[];
@@ -97,7 +116,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onSelectProject, onShowC
   };
 
   const fetchLeaveRequests = async () => {
-    if (!isCEO) return;
+    if (!currentUser) return;
     try {
       setLeaveLoading(true);
       const res = await apiFetch('/api/leave');
@@ -162,6 +181,22 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onSelectProject, onShowC
     return true;
   });
 
+  const isExecutiveDashboard =
+    isCEO || (data?.dashboardScope?.isExecutive ?? false) || (data?.dashboardScope?.roleRank === 1);
+  const isManagerDashboard =
+    !isExecutiveDashboard &&
+    ((data?.dashboardScope?.roleRank ?? 99) <= 2 || (data?.dashboardScope?.isManager ?? false) || (currentUser?.roleRank !== undefined && currentUser.roleRank <= 2));
+
+  // Determine if this user has authority to review leaves (executives or managers with subordinate requests)
+  const canReviewLeaves =
+    isExecutiveDashboard ||
+    isManagerDashboard ||
+    (data?.dashboardScope?.isManager ?? false) ||
+    leaveRequests.some((l) => l.requestedBy !== currentUser?.id);
+
+  // Subordinate requests available for review (strictly excluding own requests)
+  const reviewableLeaves = leaveRequests.filter((l) => l.requestedBy !== currentUser?.id);
+  const pendingApprovals = reviewableLeaves.filter((l) => l.status === 'Pending');
   const pendingLeave = leaveRequests.filter((l) => l.status === 'Pending');
 
   return (
@@ -173,19 +208,50 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onSelectProject, onShowC
         </div>
       )}
 
-      {/* Header — title + Refresh */}
-      <div className="flex items-start sm:items-center justify-between gap-3">
+      {/* Header — dynamic role-aware dashboard title + Refresh */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap mb-1">
+            <span
+              className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border uppercase tracking-wider ${
+                isExecutiveDashboard
+                  ? 'bg-[#231E1B] text-white border-[#231E1B]'
+                  : isManagerDashboard
+                  ? 'bg-[#EFF6FF] text-[#1E40AF] border-[#BFDBFE]'
+                  : 'bg-[#FAF6EE] text-[#554E44] border-[#E8E2D5]'
+              }`}
+            >
+              {isExecutiveDashboard
+                ? 'CEO Dashboard • Organization-Wide Scope'
+                : isManagerDashboard
+                ? `${currentUser?.role || 'CTO'} Dashboard • Team Scope`
+                : `${currentUser?.role || 'Employee'} Workspace • Project Scope`}
+            </span>
+            {data?.dashboardScope && (
+              <span className="text-[10px] text-[#70675D]">
+                {data.dashboardScope.visibleProjectsCount} Authorized Project(s)
+                {data.workloadMetrics?.teamDistribution ? ` • ${data.workloadMetrics.teamDistribution.totalTeam} Team Members` : ''}
+              </span>
+            )}
+          </div>
           <h1 className="font-display text-xl sm:text-2xl lg:text-3xl font-bold text-[#231E1B] tracking-tight">
-            Attention Stream
+            {isExecutiveDashboard
+              ? 'Executive Command & Operations'
+              : isManagerDashboard
+              ? 'Leadership & Team Operations Pulse'
+              : 'Workspace & Operational Pulse'}
           </h1>
           <p className="text-xs lg:text-sm text-[#70675D] mt-0.5 break-words">
-            Live operational pulse, critical blockers, and action items for {currentUser?.name}.
+            {isExecutiveDashboard
+              ? `Live organization-wide projects, task distributions, workload capacity, and operational alerts.`
+              : isManagerDashboard
+              ? `Authorized projects, tasks assigned to subordinates below you, and team workload capacity.`
+              : `Your assigned commitments, authorized project progress, and colleagues working with you.`}
           </p>
         </div>
         <button
           onClick={fetchAlerts}
-          className="shrink-0 px-3.5 py-2 sm:px-4 rounded-full text-xs lg:text-xs font-semibold bg-[#F5F1E8] hover:bg-[#EAE4D6] active:scale-95 border border-[#DDD6C8] text-[#5A524A] transition-all cursor-pointer min-h-[36px] sm:min-h-[44px] flex items-center gap-1.5 shadow-2xs"
+          className="shrink-0 self-start sm:self-auto px-3.5 py-2 sm:px-4 rounded-full text-xs font-semibold bg-[#F5F1E8] hover:bg-[#EAE4D6] active:scale-95 border border-[#DDD6C8] text-[#5A524A] transition-all cursor-pointer min-h-[36px] sm:min-h-[44px] flex items-center gap-1.5 shadow-2xs"
         >
           <Clock className="w-3.5 h-3.5" />
           <span className="sm:hidden">Refresh</span>
@@ -238,17 +304,405 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onSelectProject, onShowC
           <div className="p-3 sm:p-3.5 rounded-2xl bg-white border border-[#EAE3D5] shadow-xs flex flex-col justify-between">
             <div className="flex items-center justify-between gap-1">
               <span className="text-[10px] sm:text-xs font-bold text-[#2D5A34] uppercase tracking-wider truncate">
-                Active Tasks
+                {isExecutiveDashboard ? 'Org Projects' : isManagerDashboard ? 'Team Tasks' : 'Active Tasks'}
               </span>
               <CheckSquare className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#407B4A] shrink-0" />
             </div>
             <div className="mt-1 sm:mt-2 text-xl sm:text-2xl font-bold font-serif text-[#231E1B]">
-              {data.summary.myTasksCount}
+              {isExecutiveDashboard
+                ? data.summary.totalProjectsCount
+                : isManagerDashboard
+                ? (data.taskDistribution?.total ?? data.summary.myTasksCount)
+                : data.summary.myTasksCount}
             </div>
-            <span className="text-[10px] sm:text-[11px] text-[#70675D] mt-0.5 truncate">Assigned to you</span>
+            <span className="text-[10px] sm:text-[11px] text-[#70675D] mt-0.5 truncate">
+              {isExecutiveDashboard
+                ? `${data.summary.onTrackCount} on track`
+                : isManagerDashboard
+                ? 'Authorized team scope'
+                : 'Assigned to you'}
+            </span>
           </div>
         </div>
       )}
+
+      {/* Dynamic Task Distribution by Status */}
+      {data?.taskDistribution && data.taskDistribution.total > 0 && (
+        <div className="p-4 sm:p-5 rounded-2xl bg-white border border-[#E8E2D5] shadow-2xs space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <CheckSquare className="w-4 h-4 text-[#C85A32]" />
+              <h3 className="font-serif text-sm sm:text-base font-bold text-[#231E1B]">
+                {isExecutiveDashboard
+                  ? 'Organization Task Status Distribution'
+                  : isManagerDashboard
+                  ? 'Team & Subordinate Task Status Distribution'
+                  : 'Your Assigned Task Status Distribution'}
+              </h3>
+            </div>
+            <span className="text-xs font-semibold text-[#70675D]">
+              {data.taskDistribution.total} Total Tasks
+            </span>
+          </div>
+
+          {/* Segmented Distribution Bar */}
+          <div className="h-3 w-full bg-[#FAF7F2] rounded-full overflow-hidden flex border border-[#EAE3D5]">
+            {data.taskDistribution.completed > 0 && (
+              <div
+                style={{ width: `${(data.taskDistribution.completed / data.taskDistribution.total) * 100}%` }}
+                className="bg-[#2D5A34] transition-all"
+                title={`Completed: ${data.taskDistribution.completed}`}
+              />
+            )}
+            {data.taskDistribution.inProgress > 0 && (
+              <div
+                style={{ width: `${(data.taskDistribution.inProgress / data.taskDistribution.total) * 100}%` }}
+                className="bg-[#3B82F6] transition-all"
+                title={`In Progress: ${data.taskDistribution.inProgress}`}
+              />
+            )}
+            {data.taskDistribution.blocked > 0 && (
+              <div
+                style={{ width: `${(data.taskDistribution.blocked / data.taskDistribution.total) * 100}%` }}
+                className="bg-[#DC2626] transition-all"
+                title={`Blocked: ${data.taskDistribution.blocked}`}
+              />
+            )}
+            {data.taskDistribution.notStarted > 0 && (
+              <div
+                style={{ width: `${(data.taskDistribution.notStarted / data.taskDistribution.total) * 100}%` }}
+                className="bg-[#D1D5DB] transition-all"
+                title={`Not Started: ${data.taskDistribution.notStarted}`}
+              />
+            )}
+          </div>
+
+          {/* Legend Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#2D5A34] shrink-0" />
+              <span className="text-[#70675D]">Completed:</span>
+              <strong className="text-[#231E1B]">{data.taskDistribution.completed}</strong>
+            </div>
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#3B82F6] shrink-0" />
+              <span className="text-[#70675D]">In Progress:</span>
+              <strong className="text-[#231E1B]">{data.taskDistribution.inProgress}</strong>
+            </div>
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#DC2626] shrink-0" />
+              <span className="text-[#70675D]">Blocked:</span>
+              <strong className="text-[#231E1B]">{data.taskDistribution.blocked}</strong>
+            </div>
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#9CA3AF] shrink-0" />
+              <span className="text-[#70675D]">Not Started:</span>
+              <strong className="text-[#231E1B]">{data.taskDistribution.notStarted}</strong>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Workload Section: Team Distribution (CEO & CTO) vs Personal Workload (Employee/Intern) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+        {/* If team distribution is provided (CEO & CTO) */}
+        {data?.workloadMetrics?.teamDistribution && (
+          <div className="p-4 sm:p-5 rounded-2xl bg-white border border-[#E8E2D5] shadow-2xs space-y-3 flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-[#C85A32]" />
+                <h3 className="font-serif text-sm sm:text-base font-bold text-[#231E1B]">
+                  {isExecutiveDashboard
+                    ? 'Organization Workload Distribution'
+                    : 'Team Workload Distribution (Subordinates)'}
+                </h3>
+              </div>
+              <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-[#FAF6EE] text-[#70675D] border border-[#EAE3D5]">
+                {data.workloadMetrics.teamDistribution.totalTeam} Active Members
+              </span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              <div className="p-2.5 rounded-xl bg-[#FEF2F2] border border-[#FECACA] text-center">
+                <div className="text-[10px] font-bold text-[#991B1B] uppercase">Overallocated</div>
+                <div className="text-lg font-bold text-[#991B1B] font-serif">
+                  {data.workloadMetrics.teamDistribution.overallocatedCount}
+                </div>
+                <div className="text-[9px] text-[#991B1B]">&gt; 100% capacity</div>
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-[#FFFBEB] border border-[#FDE68A] text-center">
+                <div className="text-[10px] font-bold text-[#92400E] uppercase">Balanced</div>
+                <div className="text-lg font-bold text-[#92400E] font-serif">
+                  {data.workloadMetrics.teamDistribution.balancedCount}
+                </div>
+                <div className="text-[9px] text-[#92400E]">70% - 100%</div>
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-[#F0FDF4] border border-[#BBF7D0] text-center">
+                <div className="text-[10px] font-bold text-[#166534] uppercase">Available</div>
+                <div className="text-lg font-bold text-[#166534] font-serif">
+                  {data.workloadMetrics.teamDistribution.availableCount}
+                </div>
+                <div className="text-[9px] text-[#166534]">&lt; 70% capacity</div>
+              </div>
+            </div>
+
+            <div className="text-[11px] text-[#70675D] flex items-center justify-between pt-1 border-t border-[#F5F1E8]">
+              <span>Standard 37h/week reference</span>
+              <a href="/workload" className="text-[#C85A32] font-semibold hover:underline flex items-center gap-0.5">
+                View Workload Details <ChevronRight className="w-3.5 h-3.5" />
+              </a>
+            </div>
+          </div>
+        )}
+
+        {/* Personal Workload Card (Available to all users; for Employee/Intern this is their primary capacity card) */}
+        {data?.workloadMetrics?.myWorkload && (
+          <div className="p-4 sm:p-5 rounded-2xl bg-white border border-[#E8E2D5] shadow-2xs space-y-3 flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Activity className="w-4 h-4 text-[#C85A32]" />
+                <h3 className="font-serif text-sm sm:text-base font-bold text-[#231E1B]">
+                  Your Capacity Utilization
+                </h3>
+              </div>
+              <span
+                className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
+                  data.workloadMetrics.myWorkload.status === 'OVER'
+                    ? 'bg-[#FEF2F2] text-[#991B1B] border-[#FECACA]'
+                    : data.workloadMetrics.myWorkload.status === 'BALANCED'
+                    ? 'bg-[#FFFBEB] text-[#92400E] border-[#FDE68A]'
+                    : 'bg-[#F0FDF4] text-[#166534] border-[#BBF7D0]'
+                }`}
+              >
+                {data.workloadMetrics.myWorkload.statusLabel}
+              </span>
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="flex items-baseline justify-between text-xs">
+                <span className="text-[#70675D]">Allocated:</span>
+                <span className="font-bold text-sm text-[#231E1B]">
+                  {data.workloadMetrics.myWorkload.allocatedHours} hrs / 37 hrs
+                </span>
+              </div>
+              <div className="h-2.5 w-full bg-[#FAF7F2] rounded-full overflow-hidden border border-[#EAE3D5]">
+                <div
+                  style={{ width: `${Math.min(data.workloadMetrics.myWorkload.percentage, 100)}%` }}
+                  className={`h-full transition-all ${
+                    data.workloadMetrics.myWorkload.status === 'OVER'
+                      ? 'bg-[#DC2626]'
+                      : data.workloadMetrics.myWorkload.status === 'BALANCED'
+                      ? 'bg-[#D97706]'
+                      : 'bg-[#16A34A]'
+                  }`}
+                />
+              </div>
+              <div className="text-[11px] text-[#70675D] text-right">
+                {data.workloadMetrics.myWorkload.percentage}% load
+              </div>
+            </div>
+
+            <div className="text-[11px] text-[#70675D] pt-1 border-t border-[#F5F1E8]">
+              {data.workloadMetrics.myWorkload.status === 'OVER'
+                ? 'Your assigned commitments exceed regular full-time weekly capacity.'
+                : data.workloadMetrics.myWorkload.status === 'BALANCED'
+                ? 'Healthy workload allocation within normal 37h weekly bounds.'
+                : 'Available bandwidth for additional assignments or project support.'}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Authorized Projects & Progress Showcase */}
+      {data?.dashboardProjects && data.dashboardProjects.length > 0 && (
+        <div className="space-y-3.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Briefcase className="w-4 h-4 sm:w-5 sm:h-5 text-[#C85A32]" />
+              <h3 className="font-serif text-base sm:text-lg font-bold text-[#231E1B]">
+                {isExecutiveDashboard
+                  ? `Organization Projects & Progress (${data.dashboardProjects.length})`
+                  : isManagerDashboard
+                  ? `Authorized Projects & Team Progress (${data.dashboardProjects.length})`
+                  : `Your Authorized Projects (${data.dashboardProjects.length})`}
+              </h3>
+            </div>
+            <span className="text-xs text-[#70675D]">
+              Click project to inspect details
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5 sm:gap-4">
+            {data.dashboardProjects.map((p) => {
+              const internCount = p.members.filter((m) => m.isIntern).length;
+              const staffCount = p.members.filter((m) => !m.isIntern).length;
+
+              return (
+                <div
+                  key={p.id}
+                  onClick={() => onSelectProject(p.id)}
+                  className="p-4 sm:p-5 rounded-2xl bg-white border border-[#E8E2D5] hover:border-[#D5C9B8] hover:shadow-md transition-all cursor-pointer space-y-3 flex flex-col justify-between"
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="font-serif font-bold text-base text-[#231E1B] truncate">
+                            {p.name}
+                          </h4>
+                          <StatusBadge status={p.status} />
+                        </div>
+                        {p.goal && (
+                          <p className="text-xs text-[#70675D] line-clamp-2 mt-1">{p.goal}</p>
+                        )}
+                      </div>
+                      <ArrowRight className="w-4 h-4 text-[#8C7E70] shrink-0 mt-1" />
+                    </div>
+
+                    {/* Progress vs Plan */}
+                    <div className="space-y-1 pt-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-[#70675D]">
+                          Progress: <strong className="text-[#231E1B]">{p.progress}%</strong>
+                        </span>
+                        <span className="text-[#70675D]">
+                          Plan: <strong className="text-[#231E1B]">{p.plan}%</strong>
+                        </span>
+                      </div>
+                      <div className="h-2 w-full bg-[#FAF7F2] rounded-full overflow-hidden border border-[#EAE3D5]">
+                        <div
+                          style={{ width: `${Math.min(p.progress, 100)}%` }}
+                          className={`h-full ${
+                            p.status === 'ON_TRACK'
+                              ? 'bg-[#2D5A34]'
+                              : p.status === 'AT_RISK'
+                              ? 'bg-[#D97706]'
+                              : 'bg-[#DC2626]'
+                          }`}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between text-xs text-[#70675D] pt-1">
+                      <span>Tasks: <strong>{p.completedTasksCount}/{p.totalTasksCount}</strong> completed</span>
+                      <span>Owner: <strong>{p.owner?.name || 'Unassigned'}</strong></span>
+                    </div>
+                  </div>
+
+                  {/* Project Team & Interns (Deduplicated) */}
+                  <div className="pt-2.5 border-t border-[#F2ECE1] space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-semibold text-[#5A524A] flex items-center gap-1">
+                        <Users className="w-3 h-3 text-[#C85A32]" />
+                        Project Team ({p.members.length})
+                      </span>
+                      <span className="text-[#8C8275]">
+                        {internCount > 0 ? `${internCount} intern(s) &bull; ` : ''}{staffCount} staff
+                      </span>
+                    </div>
+
+                    {p.members.length === 0 ? (
+                      <div className="text-[11px] text-[#A8A195] italic">No members assigned</div>
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-1.5 max-h-20 overflow-y-auto no-scrollbar">
+                        {p.members.map((m) => (
+                          <div
+                            key={m.id}
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] border ${
+                              m.isIntern
+                                ? 'bg-[#F3E8FF] text-[#6B21A8] border-[#E9D5FF] font-semibold'
+                                : m.role === 'CTO' || m.role === 'CEO'
+                                ? 'bg-[#EFF6FF] text-[#1E40AF] border-[#BFDBFE] font-semibold'
+                                : 'bg-[#FAF8F4] text-[#554E44] border-[#EAE3D5]'
+                            }`}
+                            title={`${m.name} (${m.role} - ${m.membershipType}) • ${m.assignedTasksCount} tasks`}
+                          >
+                            <img
+                              src={m.avatarUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(m.name)}`}
+                              alt={m.name}
+                              className="w-3.5 h-3.5 rounded-full border border-white"
+                            />
+                            <span className="truncate max-w-[90px]">{m.name}</span>
+                            <span className="opacity-75">
+                              {m.isIntern ? '• Intern' : `• ${m.role}`}
+                            </span>
+                            {m.assignedTasksCount > 0 && (
+                              <span className="ml-0.5 px-1 rounded-full bg-white/70 text-[9px] font-bold">
+                                {m.assignedTasksCount}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Subordinate Work Stream (for CTO and Managers) */}
+      {data?.subordinateTasks && data.subordinateTasks.length > 0 && (
+        <div className="pt-2 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="font-serif text-base sm:text-lg font-bold text-[#231E1B] flex items-center gap-2">
+              <CheckSquare className="w-4 h-4 text-[#C85A32]" />
+              Subordinate Team Active Work Stream ({data.subordinateTasks.length})
+            </h3>
+            <span className="text-xs text-[#70675D]">
+              Direct &amp; indirect report assignments
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {data.subordinateTasks.map((t) => (
+              <div
+                key={t.id}
+                className="p-3.5 rounded-2xl bg-white border border-[#EAE3D5] space-y-2 shadow-2xs"
+              >
+                <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <img
+                      src={t.assignee?.avatarUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(t.assignee?.name || 'User')}`}
+                      alt={t.assignee?.name}
+                      className="w-4 h-4 rounded-full border border-white"
+                    />
+                    <span className="font-semibold text-[#231E1B] truncate">{t.assignee?.name}</span>
+                    <span
+                      className={`text-[9px] font-semibold px-1.5 py-0.2 rounded-full border ${
+                        t.assignee?.role === 'Intern' || t.assignee?.roleDefinition?.rank === 4
+                          ? 'bg-[#F3E8FF] text-[#6B21A8] border-[#E9D5FF]'
+                          : 'bg-[#ECFDF5] text-[#065F46] border-[#A7F3D0]'
+                      }`}
+                    >
+                      {t.assignee?.roleDefinition?.name || t.assignee?.role || 'Staff'}
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-[#70675D]">{t.plannedHours}h</span>
+                </div>
+
+                <div className="font-medium text-xs sm:text-sm text-[#231E1B] line-clamp-1">
+                  {t.title}
+                </div>
+
+                <div className="flex items-center justify-between text-[11px] text-[#70675D]">
+                  <span className="px-2 py-0.5 rounded-full bg-[#FAF6EE] text-[#554F47] text-[10px]">
+                    {t.state}
+                  </span>
+                  <span>
+                    Due: {new Date(t.plannedEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
 
       {/* Today's Calendar Preview */}
       <div className="bg-white border border-[#E8E2D5] rounded-2xl p-3.5 sm:p-4 space-y-3 shadow-2xs">
@@ -348,8 +802,8 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onSelectProject, onShowC
         </div>
       </div>
 
-      {/* ─── CEO: Leave Approvals ──────────────────────────────────────────────── */}
-      {isCEO && (
+      {/* ─── Dynamic Leave Approvals for CEO and Authorized Managers ────────────── */}
+      {canReviewLeaves && (
         <div className="bg-white border border-[#EAE3D5] rounded-2xl shadow-xs overflow-hidden">
           <button
             onClick={() => setShowLeaveSection(!showLeaveSection)}
@@ -357,10 +811,12 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onSelectProject, onShowC
           >
             <div className="flex items-center gap-2">
               <Plane className="w-4 h-4 text-[#C85A32]" />
-              <span className="font-serif font-bold text-sm text-[#231E1B]">Leave Requests</span>
-              {pendingLeave.length > 0 && (
+              <span className="font-serif font-bold text-sm text-[#231E1B]">
+                {isExecutiveDashboard ? 'Organization Leave Requests' : 'Team Leave Requests'}
+              </span>
+              {pendingApprovals.length > 0 && (
                 <span className="text-[10px] font-bold bg-[#C85A32] text-white px-2 py-0.5 rounded-full">
-                  {pendingLeave.length} pending
+                  {pendingApprovals.length} pending review
                 </span>
               )}
             </div>
@@ -380,116 +836,145 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onSelectProject, onShowC
               ) : leaveRequests.length === 0 ? (
                 <div className="py-6 text-center space-y-1">
                   <Plane className="w-8 h-8 text-[#DDD6C8] mx-auto" />
-                  <p className="text-xs text-[#70685F]">No leave requests have been submitted.</p>
+                  <p className="text-xs text-[#70685F]">No leave requests submitted within your scope.</p>
                 </div>
               ) : (
                 <div className="space-y-2.5">
-                  {leaveRequests.map((leave) => (
-                    <div
-                      key={leave.id}
-                      className={`p-3.5 rounded-xl border space-y-2 ${
-                        leave.status === 'Pending'
-                          ? 'bg-[#FFFDF9] border-[#F5DDB8]'
-                          : 'bg-[#FAF8F4] border-[#EDE7DC]'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <img
-                            src={
-                              leave.requester?.avatarUrl ||
-                              `https://api.dicebear.com/7.x/initials/svg?seed=${leave.requester?.name || 'User'}`
-                            }
-                            alt={leave.requester?.name}
-                            className="w-8 h-8 rounded-full border border-white shadow-2xs shrink-0"
-                            referrerPolicy="no-referrer"
-                          />
-                          <div className="min-w-0">
-                            <div className="text-xs font-bold text-[#231E1B] truncate">
-                              {leave.requester?.name}
-                            </div>
-                            <div className="text-[10px] text-[#70685F]">
-                              {leave.requester?.department || leave.requester?.role}
+                  {leaveRequests.map((leave) => {
+                    const isSelf = leave.requestedBy === currentUser?.id;
+                    return (
+                      <div
+                        key={leave.id}
+                        className={`p-3.5 rounded-xl border space-y-2 ${
+                          leave.status === 'Pending'
+                            ? 'bg-[#FFFDF9] border-[#F5DDB8]'
+                            : 'bg-[#FAF8F4] border-[#EDE7DC]'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <img
+                              src={
+                                leave.requester?.avatarUrl ||
+                                `https://api.dicebear.com/7.x/initials/svg?seed=${leave.requester?.name || 'User'}`
+                              }
+                              alt={leave.requester?.name}
+                              className="w-8 h-8 rounded-full border border-white shadow-2xs shrink-0"
+                              referrerPolicy="no-referrer"
+                            />
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-xs font-bold text-[#231E1B] truncate">
+                                  {leave.requester?.name}
+                                </span>
+                                <span
+                                  className={`text-[9px] font-semibold px-2 py-0.2 rounded-full border ${
+                                    leave.requester?.role === 'Intern'
+                                      ? 'bg-[#F3E8FF] text-[#6B21A8] border-[#E9D5FF]'
+                                      : leave.requester?.role === 'CTO' || leave.requester?.role === 'CEO'
+                                      ? 'bg-[#EFF6FF] text-[#1E40AF] border-[#BFDBFE]'
+                                      : 'bg-[#ECFDF5] text-[#065F46] border-[#A7F3D0]'
+                                  }`}
+                                >
+                                  {leave.requester?.roleDefinition?.name || leave.requester?.role}
+                                </span>
+                              </div>
+                              <div className="text-[10px] text-[#70685F]">
+                                {leave.requester?.department || 'Operations'}
+                              </div>
                             </div>
                           </div>
+                          <span
+                            className={`text-[10px] font-bold px-2.5 py-1 rounded-full border whitespace-nowrap shrink-0 ${leaveStatusStyle(leave.status)}`}
+                          >
+                            {leave.status}
+                          </span>
                         </div>
-                        <span
-                          className={`text-[10px] font-bold px-2.5 py-1 rounded-full border whitespace-nowrap shrink-0 ${leaveStatusStyle(leave.status)}`}
-                        >
-                          {leave.status}
-                        </span>
+
+                        <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                          <span className="font-semibold text-[#231E1B]">{leave.leaveType}</span>
+                          <span className="text-[#70685F]">·</span>
+                          <span className="text-[#70685F]">{leave.dayType}</span>
+                          <span className="text-[#70685F]">·</span>
+                          <span className="text-[#70685F]">
+                            {fmtDate(leave.startDate)}
+                            {leave.startDate !== leave.endDate ? ` – ${fmtDate(leave.endDate)}` : ''}
+                          </span>
+                        </div>
+
+                        {leave.reason && (
+                          <p className="text-[11px] text-[#8C8275] italic line-clamp-2">"{leave.reason}"</p>
+                        )}
+
+                        {leave.reviewNote && leave.status !== 'Pending' && (
+                          <div className={`text-[11px] rounded-lg px-3 py-2 ${
+                            leave.status === 'Declined'
+                              ? 'bg-[#FEE2E2] text-[#991B1B]'
+                              : leave.status === 'Sent back'
+                              ? 'bg-[#FFF8E6] text-[#92400E]'
+                              : 'bg-[#EBF2EB] text-[#2D5A34]'
+                          }`}>
+                            <strong>Note:</strong> {leave.reviewNote}
+                            {leave.reviewer && (
+                              <span className="block text-[10px] text-gray-500 mt-0.5">
+                                Decided by {leave.reviewer.name} ({leave.reviewer.role})
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Decision Buttons (strictly for Pending requests from subordinates; prevents self-approval) */}
+                        {leave.status === 'Pending' && !isSelf && (
+                          <div className="flex flex-wrap items-center gap-2 pt-1">
+                            <button
+                              id={`leave-approve-${leave.id}`}
+                              onClick={() => {
+                                setDecidingLeave(leave);
+                                setLeaveDecisionAction('APPROVE');
+                                setLeaveReviewNote('');
+                              }}
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#2D5A34] hover:bg-[#1E3E23] text-white text-[11px] font-semibold transition-all active:scale-95 cursor-pointer min-h-[36px]"
+                            >
+                              <CheckCheck className="w-3.5 h-3.5" />
+                              Approve
+                            </button>
+                            <button
+                              id={`leave-sendback-${leave.id}`}
+                              onClick={() => {
+                                setDecidingLeave(leave);
+                                setLeaveDecisionAction('SEND_BACK');
+                                setLeaveReviewNote('');
+                              }}
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#FAF7F2] hover:bg-[#EDE7DC] text-[#70685F] text-[11px] font-semibold border border-[#DDD6C8] transition-all active:scale-95 cursor-pointer min-h-[36px]"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" />
+                              Send Back
+                            </button>
+                            <button
+                              id={`leave-reject-${leave.id}`}
+                              onClick={() => {
+                                setDecidingLeave(leave);
+                                setLeaveDecisionAction('REJECT');
+                                setLeaveReviewNote('');
+                              }}
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#FEE2E2] hover:bg-[#FECACA] text-[#991B1B] text-[11px] font-semibold border border-[#FECACA] transition-all active:scale-95 cursor-pointer min-h-[36px]"
+                            >
+                              <Ban className="w-3.5 h-3.5" />
+                              Decline
+                            </button>
+                          </div>
+                        )}
+
+                        {leave.status === 'Pending' && isSelf && (
+                          <div className="pt-1">
+                            <span className="text-[11px] italic text-[#8C8275] bg-[#FAF8F4] px-2.5 py-1 rounded-md border border-[#EDE7DC]">
+                              Your request (awaiting supervisor review)
+                            </span>
+                          </div>
+                        )}
                       </div>
-
-                      <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-                        <span className="font-semibold text-[#231E1B]">{leave.leaveType}</span>
-                        <span className="text-[#70685F]">·</span>
-                        <span className="text-[#70685F]">{leave.dayType}</span>
-                        <span className="text-[#70685F]">·</span>
-                        <span className="text-[#70685F]">
-                          {fmtDate(leave.startDate)}
-                          {leave.startDate !== leave.endDate ? ` – ${fmtDate(leave.endDate)}` : ''}
-                        </span>
-                      </div>
-
-                      {leave.reason && (
-                        <p className="text-[11px] text-[#8C8275] italic line-clamp-2">"{leave.reason}"</p>
-                      )}
-
-                      {leave.reviewNote && leave.status !== 'Pending' && (
-                        <div className={`text-[11px] rounded-lg px-3 py-2 ${
-                          leave.status === 'Declined'
-                            ? 'bg-[#FEE2E2] text-[#991B1B]'
-                            : leave.status === 'Sent back'
-                            ? 'bg-[#FFF8E6] text-[#92400E]'
-                            : 'bg-[#EBF2EB] text-[#2D5A34]'
-                        }`}>
-                          <strong>Note:</strong> {leave.reviewNote}
-                        </div>
-                      )}
-
-                      {/* Decision Buttons (only for Pending) */}
-                      {leave.status === 'Pending' && (
-                        <div className="flex flex-wrap items-center gap-2 pt-1">
-                          <button
-                            id={`leave-approve-${leave.id}`}
-                            onClick={() => {
-                              setDecidingLeave(leave);
-                              setLeaveDecisionAction('APPROVE');
-                              setLeaveReviewNote('');
-                            }}
-                            className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#2D5A34] hover:bg-[#1E3E23] text-white text-[11px] font-semibold transition-all active:scale-95 cursor-pointer min-h-[36px]"
-                          >
-                            <CheckCheck className="w-3.5 h-3.5" />
-                            Approve
-                          </button>
-                          <button
-                            id={`leave-sendback-${leave.id}`}
-                            onClick={() => {
-                              setDecidingLeave(leave);
-                              setLeaveDecisionAction('SEND_BACK');
-                              setLeaveReviewNote('');
-                            }}
-                            className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#FAF7F2] hover:bg-[#EDE7DC] text-[#70685F] text-[11px] font-semibold border border-[#DDD6C8] transition-all active:scale-95 cursor-pointer min-h-[36px]"
-                          >
-                            <RotateCcw className="w-3.5 h-3.5" />
-                            Send Back
-                          </button>
-                          <button
-                            id={`leave-reject-${leave.id}`}
-                            onClick={() => {
-                              setDecidingLeave(leave);
-                              setLeaveDecisionAction('REJECT');
-                              setLeaveReviewNote('');
-                            }}
-                            className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#FEE2E2] hover:bg-[#FECACA] text-[#991B1B] text-[11px] font-semibold border border-[#FECACA] transition-all active:scale-95 cursor-pointer min-h-[36px]"
-                          >
-                            <Ban className="w-3.5 h-3.5" />
-                            Decline
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
