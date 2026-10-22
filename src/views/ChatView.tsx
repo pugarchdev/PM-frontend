@@ -3,33 +3,19 @@ import { MessageSquare, FolderKanban, ChevronRight, Hash, Users } from 'lucide-r
 import { ProjectChatTab } from '../components/ProjectChatTab.tsx';
 import { StatusBadge } from '../components/StatusBadge.tsx';
 import { Project } from '../types.ts';
-import { apiFetch } from '../lib/api.ts';
+import { useAuth } from '../context/AuthContext.tsx';
+import { useProjectsQuery } from '../lib/queries.ts';
 
 export const ChatView: React.FC = () => {
-  const [projects, setProjects] = useState<Project[]>([]);
+  const { currentUser } = useAuth();
+  const { data: projects = [], isLoading: loading } = useProjectsQuery(currentUser?.id);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchProjects = async () => {
-      try {
-        setLoading(true);
-        const res = await apiFetch('/api/projects');
-        if (res.ok) {
-          const data = await res.json();
-          setProjects(data || []);
-          if (data && data.length > 0 && !selectedProject) {
-            setSelectedProject(data[0]);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to load projects for chat:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchProjects();
-  }, []);
+    if (projects.length > 0 && !selectedProject) {
+      setSelectedProject(projects[0]);
+    }
+  }, [projects, selectedProject]);
 
   return (
     <div className="space-y-6 pb-24">

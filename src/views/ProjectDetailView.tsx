@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { apiFetch, apiUrl } from '../lib/api.ts';
+import { useUsersListQuery, invalidateProjectQueries, useProjectDetailQuery } from '../lib/queries.ts';
+import { queryClient } from '../lib/queryClient.ts';
 import { Project, Phase, Task, Issue, Risk, Milestone, QualityCheck, IssueAttachment } from '../types.ts';
 import { StatusBadge, PriorityBadge, SeverityBadge, TaskStateBadge } from '../components/StatusBadge.tsx';
 import { RaiseIssueModal } from '../components/RaiseIssueModal.tsx';
@@ -11,6 +13,7 @@ import { ProjectApprovalsTab } from '../components/ProjectApprovalsTab.tsx';
 import { ProjectBaselinesTab } from '../components/ProjectBaselinesTab.tsx';
 import { ProjectDocumentsTab } from '../components/ProjectDocumentsTab.tsx';
 import { ProjectChangeLogTab } from '../components/ProjectChangeLogTab.tsx';
+import { formatCurrency } from '../lib/currency.ts';
 import {
   ArrowLeft,
   Calendar,
@@ -53,9 +56,24 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   onBack,
 }) => {
   const { currentUser, isCEO, isProjectOwner, isEmployee } = useAuth();
+  const { data: usersList = [] } = useUsersListQuery(currentUser?.id);
+
+  const {
+    data: detailData,
+    isLoading: detailLoading,
+    error: detailError,
+    refetch: refetchProjectDetail,
+  } = useProjectDetailQuery(projectId, currentUser?.id);
+
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Membership Management State
+  const [showAddMemberModal, setShowAddMemberModal] = useState(false);
+  const [newMemberUserId, setNewMemberUserId] = useState('');
+  const [newMemberRole, setNewMemberRole] = useState('Member');
+  const [memberSubmitting, setMemberSubmitting] = useState(false);
 
   const projectMembers = React.useMemo(() => {
     if (!project) return [];
@@ -153,7 +171,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     | 'documents'
     | 'chat'
     | 'changelog'
-  >((initialTab as any) || 'phases');
+  >((initialTab as any) === 'tasks' ? 'phases' : (initialTab as any) || 'phases');
 
   // Modals & Action states
   const [toastMessage, setToastMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
@@ -203,42 +221,87 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     setTimeout(() => setToastMessage(null), 5000);
   };
 
-  const fetchProject = async (showLoading = false) => {
-    try {
-      if (showLoading && !project) {
-        setLoading(true);
-      }
-      setError(null);
-      const res = await apiFetch(`/api/projects/${projectId}`);
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || 'Failed to load project details');
-      }
-      const data = await res.json();
-      setProject(data);
-      // default phase start/end to project dates
-      if (data && showLoading && !project) {
-        setNewPhaseStart(data.startDate.slice(0, 10));
-        setNewPhaseEnd(data.endDate.slice(0, 10));
-        setNewTaskPlannedStart(data.startDate.slice(0, 10));
-        setNewTaskPlannedEnd(data.endDate.slice(0, 10));
-        setNewMilestoneBaseline(data.startDate.slice(0, 10));
-        setNewMilestoneForecast(data.startDate.slice(0, 10));
-      }
-    } catch (err: any) {
-      if (!project) {
-        setError(err.message || 'Error fetching project');
-      }
-    } finally {
-      if (showLoading && !project) {
-        setLoading(false);
-      }
+  const fetchProject = async (
+    showLoading = false,
+    mutationScope?: {
+      tasks?: boolean;
+      issues?: boolean;
+      risks?: boolean;
+      budget?: boolean;
+      baselines?: boolean;
+      approvals?: boolean;
+      documents?: boolean;
+      statusOverride?: boolean;
+      members?: boolean;
+      charter?: boolean;
+    }
+  ) => {
+    if (mutationScope) {
+      invalidateProjectQueries(queryClient, currentUser?.id, projectId, mutationScope);
+    }
+    const result = await refetchProjectDetail();
+    if (result.data) {
+      setProject(result.data);
     }
   };
 
   useEffect(() => {
-    fetchProject(!project);
-  }, [projectId, currentUser?.id]);
+    if (detailData) {
+      setProject(detailData);
+      setLoading(false);
+      setError(null);
+      setNewPhaseStart((prev) => prev || detailData.startDate.slice(0, 10));
+      setNewPhaseEnd((prev) => prev || detailData.endDate.slice(0, 10));
+      setNewTaskPlannedStart((prev) => prev || detailData.startDate.slice(0, 10));
+      setNewTaskPlannedEnd((prev) => prev || detailData.endDate.slice(0, 10));
+      setNewMilestoneBaseline((prev) => prev || detailData.startDate.slice(0, 10));
+      setNewMilestoneForecast((prev) => prev || detailData.startDate.slice(0, 10));
+    } else if (detailError) {
+      setError((detailError as Error).message || 'Failed to load project details');
+      setLoading(false);
+    }
+  }, [detailData, detailError]);
+
+  const handleAddMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newMemberUserId) return;
+    setMemberSubmitting(true);
+    try {
+      const res = await apiFetch(`/api/projects/${projectId}/members`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: newMemberUserId, role: newMemberRole }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to add member');
+
+      showToast('success', 'Project member added successfully');
+      setShowAddMemberModal(false);
+      setNewMemberUserId('');
+      setNewMemberRole('Member');
+      fetchProject(false, { members: true });
+    } catch (err: any) {
+      showToast('error', err.message);
+    } finally {
+      setMemberSubmitting(false);
+    }
+  };
+
+  const handleRemoveMember = async (memberUserId: string, memberName: string) => {
+    if (!window.confirm(`Are you sure you want to remove ${memberName} from this project?`)) return;
+    try {
+      const res = await apiFetch(`/api/projects/${projectId}/members/${memberUserId}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to remove member');
+
+      showToast('success', `${memberName} removed from project`);
+      fetchProject(false, { members: true });
+    } catch (err: any) {
+      showToast('error', err.message);
+    }
+  };
 
   // STATUS OVERRIDE SUBMISSION
   const handleStatusOverride = async (e: React.FormEvent) => {
@@ -290,7 +353,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
 
       showToast('success', `Status overridden to ${overrideStatus}`);
       setOverrideReason('');
-      fetchProject(false);
+      fetchProject(false, { statusOverride: true });
     } catch (err: any) {
       showToast('error', err.message);
     }
@@ -332,7 +395,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
       }
 
       showToast('success', 'Status override cleared. Project status restored to automatic calculation.');
-      fetchProject(false);
+      fetchProject(false, { statusOverride: true });
     } catch (err: any) {
       showToast('error', err.message);
     }
@@ -381,7 +444,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
       showToast('success', `Phase "${newPhaseName}" created`);
       setShowNewPhaseModal(false);
       setNewPhaseName('');
-      fetchProject(false);
+      fetchProject(false, { tasks: true });
     } catch (err: any) {
       showToast('error', err.message);
     } finally {
@@ -408,7 +471,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
       });
 
       showToast('success', 'Phase archived successfully');
-      fetchProject(false);
+      fetchProject(false, { tasks: true });
     } catch (err: any) {
       showToast('error', err.message);
     }
@@ -431,7 +494,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
       });
 
       showToast('success', 'Empty phase deleted');
-      fetchProject(false);
+      fetchProject(false, { tasks: true });
     } catch (err: any) {
       showToast('error', err.message);
     }
@@ -502,7 +565,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
       setShowNewTaskModal(false);
       setNewTaskTitle('');
       setNewTaskAssigneeId('');
-      fetchProject(false);
+      fetchProject(false, { tasks: true });
     } catch (err: any) {
       showToast('error', err.message);
     } finally {
@@ -606,7 +669,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
       });
 
       showToast('success', `Task state updated to ${newState}`);
-      fetchProject(false);
+      fetchProject(false, { tasks: true });
     } catch (err: any) {
       showToast('error', err.message);
     }
@@ -639,7 +702,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
         };
       });
 
-      fetchProject(false);
+      fetchProject(false, { tasks: true });
     } catch (err: any) {
       showToast('error', err.message);
     }
@@ -673,7 +736,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
       });
 
       showToast('success', 'Quality check added');
-      fetchProject(false);
+      fetchProject(false, { tasks: true });
     } catch (err: any) {
       showToast('error', err.message);
     }
@@ -718,7 +781,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
         });
         showToast('success', 'Task risk flagged');
       }
-      fetchProject(false);
+      fetchProject(false, { tasks: true, risks: true });
     } catch (err: any) {
       showToast('error', err.message);
     }
@@ -742,7 +805,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
       });
 
       showToast('success', 'Issue marked closed');
-      fetchProject(false);
+      fetchProject(false, { issues: true });
     } catch (err: any) {
       showToast('error', err.message);
     }
@@ -784,7 +847,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
       setShowReopenModal(false);
       setReopenComment('');
       setReopenIssueId(null);
-      fetchProject(false);
+      fetchProject(false, { issues: true });
     } catch (err: any) {
       showToast('error', err.message);
     } finally {
@@ -830,7 +893,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
       setShowNewRiskModal(false);
       setNewRiskDesc('');
       setNewRiskMitigation('');
-      fetchProject(false);
+      fetchProject(false, { risks: true });
     } catch (err: any) {
       showToast('error', err.message);
     } finally {
@@ -857,7 +920,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
       });
 
       showToast('success', 'Risk closed');
-      fetchProject(false);
+      fetchProject(false, { risks: true });
     } catch (err: any) {
       showToast('error', err.message);
     }
@@ -901,7 +964,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
       showToast('success', `Milestone "${newMilestoneTitle}" added`);
       setShowNewMilestoneModal(false);
       setNewMilestoneTitle('');
-      fetchProject(false);
+      fetchProject(false, { tasks: true });
     } catch (err: any) {
       showToast('error', err.message);
     } finally {
@@ -981,7 +1044,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
           <div className="space-y-1 min-w-0">
             <div className="flex items-center justify-between sm:justify-start gap-2 flex-wrap">
               <span className="text-[10px] sm:text-xs font-semibold text-[#8C6D58] uppercase tracking-wider bg-[#F5F1E8] sm:bg-transparent px-2 py-0.5 sm:px-0 sm:py-0 rounded-full">
-                {project.sponsor} Sponsor
+                {project.sponsor} • Client
               </span>
               <StatusBadge
                 status={metrics.status}
@@ -1062,7 +1125,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
             <span className="font-semibold text-[#231E1B] truncate block">{project.owner?.name}</span>
           </div>
           <div className="min-w-0">
-            <span className="text-[10px] sm:text-xs text-[#8C8275] block">Sponsor</span>
+            <span className="text-[10px] sm:text-xs text-[#8C8275] block">Client</span>
             <span className="font-semibold text-[#231E1B] truncate block">{project.sponsor}</span>
           </div>
           {!isEmployee ? (
@@ -1070,13 +1133,13 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
               <div className="min-w-0">
                 <span className="text-[10px] sm:text-xs text-[#8C8275] block">Planned Budget</span>
                 <span className="font-semibold text-[#231E1B] truncate block">
-                  £{project.plannedBudget.toLocaleString()}
+                  {formatCurrency(project.plannedBudget)}
                 </span>
               </div>
               <div className="min-w-0">
                 <span className="text-[10px] sm:text-xs text-[#8C8275] block">Spend to Date</span>
                 <span className="font-semibold text-[#C85A32] truncate block">
-                  £{project.spendToDate.toLocaleString()}
+                  {formatCurrency(project.spendToDate)}
                 </span>
               </div>
             </>
@@ -1199,10 +1262,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                           onClick={() => {
                             setSelectedPhaseId(phase.id);
                             setShowNewTaskModal(true);
-                            apiFetch('/api/users')
-                              .then((r) => r.json())
-                              .then((users) => setAssignableUsers(users))
-                              .catch(() => setAssignableUsers([]));
+                            setAssignableUsers(usersList as any);
                           }}
                           className="px-2.5 py-1.5 rounded-full bg-white border border-[#D5CCBC] hover:border-[#C85A32] text-xs font-semibold text-[#231E1B] flex items-center gap-1 min-h-[34px] sm:min-h-[38px] cursor-pointer"
                         >
@@ -1468,7 +1528,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
               </div>
 
               <div className="p-3 rounded-xl bg-[#FAF7F0] space-y-1">
-                <span className="text-[#8C8275] uppercase font-bold text-[10px]">Executive Sponsor</span>
+                <span className="text-[#8C8275] uppercase font-bold text-[10px]">Client</span>
                 <p className="text-sm font-medium text-[#231E1B]">{project.sponsor}</p>
               </div>
 
@@ -1507,6 +1567,14 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                 <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-[#ECFDF5] text-[#065F46] border border-[#A7F3D0]">
                   {projectMembers.filter((m) => !m.isIntern).length} Staff
                 </span>
+                {(isCEO || isProjectOwner || project?.ownerId === currentUser?.id) && (
+                  <button
+                    onClick={() => setShowAddMemberModal(true)}
+                    className="px-3 py-1 rounded-full text-xs font-semibold text-white bg-[#C85A32] hover:bg-[#993F1C] flex items-center gap-1 cursor-pointer transition-all active:scale-95 shadow-2xs"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Add Member
+                  </button>
+                )}
               </div>
             </div>
 
@@ -1543,11 +1611,22 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                         </div>
                       </div>
                     </div>
-                    <div className="text-right shrink-0">
-                      <div className="text-xs font-semibold text-[#231E1B]">{member.taskCount} tasks</div>
-                      <div className="text-[10px] text-[#70675D]">
-                        {member.activeTaskCount} active
+                    <div className="text-right shrink-0 flex items-center gap-2">
+                      <div>
+                        <div className="text-xs font-semibold text-[#231E1B]">{member.taskCount} tasks</div>
+                        <div className="text-[10px] text-[#70675D]">
+                          {member.activeTaskCount} active
+                        </div>
                       </div>
+                      {(isCEO || isProjectOwner || project?.ownerId === currentUser?.id) && member.id !== project?.ownerId && (
+                        <button
+                          onClick={() => handleRemoveMember(member.id, member.name)}
+                          className="p-1 rounded-md text-[#9C9488] hover:text-[#B3261E] hover:bg-[#FDE8E8] transition-colors cursor-pointer"
+                          title={`Remove ${member.name} from project`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -2257,7 +2336,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
               prev ? { ...prev, issues: [newIssue, ...(prev.issues || [])] } : prev
             );
             showToast('success', `Issue "${newIssue.title}" logged`);
-            fetchProject(false);
+            fetchProject(false, { issues: true });
           }}
           projects={[{ id: project.id, name: project.name }]}
           fixedProjectId={project.id}
@@ -2477,6 +2556,85 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                   className="px-5 py-2.5 rounded-full text-xs font-semibold bg-[#C85A32] text-white hover:bg-[#AD4722] min-h-[44px] shadow-xs cursor-pointer active:scale-95 flex-1 sm:flex-none"
                 >
                   Save Milestone
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ADD MEMBER MODAL */}
+      {showAddMemberModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-in fade-in duration-200"
+          onClick={() => setShowAddMemberModal(false)}
+        >
+          <div
+            className="w-full max-w-md bg-white rounded-3xl p-6 shadow-2xl border border-[#EAE3D5] space-y-4 animate-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-[#EAE3D5]">
+              <h3 className="font-serif text-lg font-bold text-[#231E1B]">Add Member to Project</h3>
+              <button
+                onClick={() => setShowAddMemberModal(false)}
+                className="p-1 text-[#8C8275] hover:text-[#231E1B] rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddMember} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-[#231E1B] mb-1">
+                  Select Team Member <span className="text-red-500">*</span>
+                </label>
+                <select
+                  required
+                  value={newMemberUserId}
+                  onChange={(e) => setNewMemberUserId(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-[#DDD6C8] text-xs sm:text-sm bg-white"
+                >
+                  <option value="">-- Choose User --</option>
+                  {usersList
+                    .filter((u) => !projectMembers.some((m) => m.id === u.id))
+                    .map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name} ({u.role || 'Staff'})
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[#231E1B] mb-1">
+                  Project Role
+                </label>
+                <select
+                  value={newMemberRole}
+                  onChange={(e) => setNewMemberRole(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-[#DDD6C8] text-xs sm:text-sm bg-white"
+                >
+                  <option value="Member">Member</option>
+                  <option value="Lead">Lead</option>
+                  <option value="Contributor">Contributor</option>
+                  <option value="Reviewer">Reviewer</option>
+                </select>
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddMemberModal(false)}
+                  className="px-4 py-2 rounded-full text-xs font-semibold bg-[#F5F1E8] hover:bg-[#EAE4D6] cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={memberSubmitting || !newMemberUserId}
+                  className="px-5 py-2 rounded-full text-xs font-semibold bg-[#C85A32] text-white hover:bg-[#993F1C] disabled:opacity-50 cursor-pointer shadow-xs active:scale-95"
+                >
+                  {memberSubmitting ? 'Adding...' : 'Add Member'}
                 </button>
               </div>
             </form>

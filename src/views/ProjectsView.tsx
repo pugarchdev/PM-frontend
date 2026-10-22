@@ -17,8 +17,22 @@ import {
   Plus,
   X,
   Loader2,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api.ts';
+import { useProjectsPaginatedQuery, queryKeys, invalidateProjectQueries } from '../lib/queries.ts';
+import { queryClient } from '../lib/queryClient.ts';
+import { CURRENCY_SYMBOL } from '../lib/currency.ts';
+
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState<T>(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return debouncedValue;
+}
 
 interface ProjectsViewProps {
   onSelectProject: (projectId: string) => void;
@@ -26,11 +40,38 @@ interface ProjectsViewProps {
 
 export const ProjectsView: React.FC<ProjectsViewProps> = ({ onSelectProject }) => {
   const { currentUser, isCEO, isProjectOwner, directory } = useAuth();
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebounce(searchQuery, 300);
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ON_TRACK' | 'AT_RISK' | 'OFF_TRACK'>('ALL');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [sortBy, setSortBy] = useState<'startDate' | 'name' | 'endDate'>('startDate');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+
+  // Reset page to 1 when filters change
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, statusFilter, pageSize, sortBy, sortOrder]);
+
+  const {
+    data: paginatedData,
+    isLoading: loading,
+    isFetching,
+    error: projectsError,
+    refetch: fetchProjects,
+  } = useProjectsPaginatedQuery(currentUser?.id, {
+    search: debouncedSearch,
+    status: statusFilter,
+    page,
+    limit: pageSize,
+    sortBy,
+    sortOrder,
+  });
+
+  const projects = paginatedData?.projects || [];
+  const pagination = paginatedData?.pagination || { total: 0, page: 1, limit: pageSize, totalPages: 1 };
+  const error = projectsError ? (projectsError as Error).message : null;
   const [viewMode, setViewMode] = useState<'list' | 'ceo_portfolio'>('list');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createLoading, setCreateLoading] = useState(false);
@@ -46,31 +87,6 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onSelectProject }) =
     plannedBudget: 0,
     contingency: 0,
   });
-
-  const fetchProjects = async (showLoading = true) => {
-    try {
-      if (showLoading) {
-        setLoading(true);
-      }
-      setError(null);
-      const res = await apiFetch('/api/projects');
-      if (!res.ok) throw new Error('Failed to load projects');
-      const data = await res.json();
-      setProjects(data);
-    } catch (err: any) {
-      if (showLoading) {
-        setError(err.message || 'Error fetching projects');
-      }
-    } finally {
-      if (showLoading) {
-        setLoading(false);
-      }
-    }
-  };
-
-  useEffect(() => {
-    fetchProjects(true);
-  }, [currentUser]);
 
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -103,14 +119,6 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onSelectProject }) =
         throw new Error(data.error || 'Failed to create project');
       }
 
-      // Immediate local state update
-      if (data && data.id) {
-        setProjects((prev) => {
-          const exists = prev.some((p) => p.id === data.id);
-          return exists ? prev : [data, ...prev];
-        });
-      }
-
       setShowCreateModal(false);
       setFormData({
         name: '',
@@ -122,7 +130,9 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onSelectProject }) =
         plannedBudget: 0,
         contingency: 0,
       });
-      fetchProjects(false);
+
+      // Invalidate relevant TanStack queries
+      invalidateProjectQueries(queryClient, currentUser?.id);
     } catch (err: any) {
       setCreateError(err.message || 'Failed to create project');
     } finally {
@@ -138,17 +148,8 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onSelectProject }) =
 
   const today = new Date().toISOString().split('T')[0];
 
-  const filteredProjects = projects.filter((p) => {
-    const matchesSearch =
-      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.goal.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.owner?.name.toLowerCase().includes(searchQuery.toLowerCase());
-
-    const projectStatus = p.metrics?.status || 'ON_TRACK';
-    const matchesStatus = statusFilter === 'ALL' || projectStatus === statusFilter;
-
-    return matchesSearch && matchesStatus;
-  });
+  // Server-side filtered & paginated projects
+  const filteredProjects = projects;
 
   return (
     <div className="space-y-5 sm:space-y-6 pb-20 sm:pb-24 max-w-full overflow-hidden sm:overflow-visible">
@@ -297,7 +298,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onSelectProject }) =
         <div className="p-4 rounded-2xl bg-[#FEE2E2] border border-[#FECACA] text-[#991B1B] text-sm flex items-center justify-between">
           <span>{error}</span>
           <button
-            onClick={() => fetchProjects(true)}
+            onClick={() => fetchProjects()}
             className="px-3 py-1 rounded-lg bg-white border border-[#F87171] text-xs font-semibold cursor-pointer"
           >
             Retry
@@ -430,6 +431,69 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onSelectProject }) =
           })}
         </div>
       )}
+
+      {/* Pagination Bar */}
+      {!loading && pagination.total > 0 && (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-[#EAE3D5] text-xs text-[#70675D]">
+          <div className="flex items-center gap-2">
+            <span>
+              Showing{' '}
+              <strong className="text-[#231E1B]">
+                {Math.min((page - 1) * pageSize + 1, pagination.total)}
+              </strong>{' '}
+              to{' '}
+              <strong className="text-[#231E1B]">
+                {Math.min(page * pageSize, pagination.total)}
+              </strong>{' '}
+              of <strong className="text-[#231E1B]">{pagination.total}</strong> initiatives
+            </span>
+            {isFetching && !loading && (
+              <span className="text-[10px] text-[#C85A32] font-semibold animate-pulse">
+                Updating...
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5">
+              <span>Show:</span>
+              <select
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value))}
+                className="px-2.5 py-1 rounded-lg border border-[#DDD6C8] bg-white text-xs font-medium cursor-pointer"
+              >
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="p-1.5 rounded-lg border border-[#DDD6C8] bg-white hover:bg-[#F5F1E8] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                title="Previous page"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+
+              <span className="px-2 font-medium text-[#231E1B]">
+                Page {page} of {pagination.totalPages}
+              </span>
+
+              <button
+                onClick={() => setPage((p) => Math.min(pagination.totalPages, p + 1))}
+                disabled={page >= pagination.totalPages}
+                className="p-1.5 rounded-lg border border-[#DDD6C8] bg-white hover:bg-[#F5F1E8] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                title="Next page"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
         </>
       )}
 
@@ -500,17 +564,17 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onSelectProject }) =
                 />
               </div>
 
-              {/* Sponsor */}
+              {/* Client */}
               <div>
                 <label htmlFor="project-sponsor" className="block text-xs sm:text-sm font-semibold text-[#231E1B] mb-1.5">
-                  Executive Sponsor <span className="text-[#C85A32]">*</span>
+                  Client <span className="text-[#C85A32]">*</span>
                 </label>
                 <input
                   id="project-sponsor"
                   type="text"
                   value={formData.sponsor}
                   onChange={(e) => handleInputChange('sponsor', e.target.value)}
-                  placeholder="e.g., Eleanor Foley"
+                  placeholder="e.g., Acme Corp or Eleanor Foley"
                   required
                   maxLength={150}
                   className="w-full px-4 py-2.5 rounded-xl bg-white border border-[#DDD6C8] text-sm text-[#231E1B] placeholder-[#8F867A] focus:outline-hidden focus:border-[#C85A32] shadow-2xs min-h-[44px]"
@@ -590,7 +654,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onSelectProject }) =
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                   <div>
                     <label htmlFor="project-budget" className="block text-xs sm:text-sm font-semibold text-[#231E1B] mb-1.5">
-                      Planned Budget (£)
+                      Planned Budget ({CURRENCY_SYMBOL})
                     </label>
                     <input
                       id="project-budget"
@@ -605,7 +669,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onSelectProject }) =
                   </div>
                   <div>
                     <label htmlFor="project-contingency" className="block text-xs sm:text-sm font-semibold text-[#231E1B] mb-1.5">
-                      Contingency (£)
+                      Contingency ({CURRENCY_SYMBOL})
                     </label>
                     <input
                       id="project-contingency"

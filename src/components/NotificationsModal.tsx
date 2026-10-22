@@ -5,6 +5,9 @@ import { getSocket } from '../lib/socket.ts';
 import { apiFetch } from '../lib/api.ts';
 import { NotificationItem } from '../types.ts';
 
+import { useNotificationsQuery, invalidateNotificationQueries, queryKeys } from '../lib/queries.ts';
+import { queryClient } from '../lib/queryClient.ts';
+
 interface NotificationsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -18,33 +21,11 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
   onNavigate,
 }) => {
   const { currentUser } = useAuth();
-  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-  const [unreadCount, setUnreadCount] = useState<number>(0);
-  const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
 
-  const fetchNotifications = async () => {
-    if (!currentUser) return;
-    try {
-      setLoading(true);
-      const res = await apiFetch('/api/notifications');
-      if (res.ok) {
-        const data = await res.json();
-        setNotifications(data.notifications || []);
-        setUnreadCount(data.unreadCount || 0);
-      }
-    } catch (e) {
-      console.error('Failed to load notifications:', e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (isOpen) {
-      fetchNotifications();
-    }
-  }, [isOpen, currentUser]);
+  const { data, isLoading: loading } = useNotificationsQuery(currentUser?.id);
+  const notifications = data?.notifications || [];
+  const unreadCount = data?.unreadCount || 0;
 
   // Real-time socket listener
   useEffect(() => {
@@ -52,8 +33,15 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
     const socket = getSocket(currentUser.id);
 
     const handleNewNotification = (notification: NotificationItem) => {
-      setNotifications((prev) => [notification, ...prev]);
-      setUnreadCount((c) => c + 1);
+      queryClient.setQueryData(queryKeys.notifications(currentUser.id), (old: any) => {
+        if (!old) return { notifications: [notification], unreadCount: 1 };
+        return {
+          ...old,
+          notifications: [notification, ...(old.notifications || [])],
+          unreadCount: (old.unreadCount || 0) + 1,
+        };
+      });
+      queryClient.invalidateQueries({ queryKey: queryKeys.badges(currentUser.id) });
     };
 
     socket.on('notification:new', handleNewNotification);
@@ -71,11 +59,17 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
     try {
       const res = await apiFetch(`/api/notifications/${id}/read`, { method: 'POST' });
       if (res.ok) {
-        const data = await res.json();
-        setNotifications((prev) =>
-          prev.map((n) => (n.id === id ? { ...n, isRead: true } : n))
-        );
-        setUnreadCount(data.unreadCount ?? Math.max(0, unreadCount - 1));
+        queryClient.setQueryData(queryKeys.notifications(currentUser?.id), (old: any) => {
+          if (!old) return old;
+          return {
+            ...old,
+            notifications: (old.notifications || []).map((n: NotificationItem) =>
+              n.id === id ? { ...n, isRead: true } : n
+            ),
+            unreadCount: Math.max(0, (old.unreadCount || 1) - 1),
+          };
+        });
+        invalidateNotificationQueries(queryClient, currentUser?.id);
       }
     } catch (err) {
       console.error('Failed to mark notification read:', err);
@@ -90,8 +84,15 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
     try {
       const res = await apiFetch('/api/notifications/read-all', { method: 'POST' });
       if (res.ok) {
-        setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
-        setUnreadCount(0);
+        queryClient.setQueryData(queryKeys.notifications(currentUser?.id), (old: any) => {
+          if (!old) return old;
+          return {
+            ...old,
+            notifications: (old.notifications || []).map((n: NotificationItem) => ({ ...n, isRead: true })),
+            unreadCount: 0,
+          };
+        });
+        invalidateNotificationQueries(queryClient, currentUser?.id);
       }
     } catch (err) {
       console.error('Failed to mark all read:', err);

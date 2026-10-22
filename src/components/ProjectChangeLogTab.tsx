@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { History, Filter, ArrowRight, UserCheck, Clock, ShieldCheck, Tag } from 'lucide-react';
 import { ChangeLogItem } from '../types.ts';
-import { apiFetch } from '../lib/api.ts';
+import { useAuth } from '../context/AuthContext.tsx';
+import { useProjectChangeLogQuery } from '../lib/queries.ts';
 
 interface ProjectChangeLogTabProps {
   projectId: string;
@@ -9,31 +10,14 @@ interface ProjectChangeLogTabProps {
 }
 
 export const ProjectChangeLogTab: React.FC<ProjectChangeLogTabProps> = ({ projectId, projectName }) => {
-  const [entries, setEntries] = useState<ChangeLogItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { currentUser } = useAuth();
+  const {
+    data: entries = [],
+    isLoading: loading,
+    error: changelogErr,
+  } = useProjectChangeLogQuery(projectId, currentUser?.id);
+  const error = changelogErr ? (changelogErr as Error).message : null;
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
-
-  const fetchChangeLog = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const res = await apiFetch(`/api/projects/${projectId}/changelog`);
-      if (!res.ok) {
-        throw new Error('Failed to load project changelog');
-      }
-      const data = await res.json();
-      setEntries(data || []);
-    } catch (err: any) {
-      setError(err.message || 'Error loading changelog');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchChangeLog();
-  }, [projectId]);
 
   const filteredEntries = entries.filter((item) => {
     if (categoryFilter === 'ALL') return true;

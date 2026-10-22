@@ -13,6 +13,9 @@ import {
 import { useAuth } from '../context/AuthContext.tsx';
 import { apiFetch } from '../lib/api.ts';
 import { BudgetHealthData } from '../types.ts';
+import { useProjectBudgetQuery, invalidateProjectQueries } from '../lib/queries.ts';
+import { queryClient } from '../lib/queryClient.ts';
+import { formatCurrency, CURRENCY_SYMBOL } from '../lib/currency.ts';
 
 interface ProjectBudgetTabProps {
   projectId: string;
@@ -21,9 +24,15 @@ interface ProjectBudgetTabProps {
 
 export const ProjectBudgetTab: React.FC<ProjectBudgetTabProps> = ({ projectId, projectName }) => {
   const { currentUser, isEmployee, isCEO, isProjectOwner } = useAuth();
-  const [budgetData, setBudgetData] = useState<BudgetHealthData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+
+  const {
+    data: budgetData = null,
+    isLoading: loading,
+    error: budgetError,
+    refetch: fetchBudget,
+  } = useProjectBudgetQuery(projectId, isEmployee ? undefined : currentUser?.id);
+  const [mutationError, setMutationError] = useState<string | null>(null);
+  const error = mutationError || (budgetError ? (budgetError as Error).message : null);
 
   // Record Spend Modal
   const [showSpendModal, setShowSpendModal] = useState(false);
@@ -31,32 +40,6 @@ export const ProjectBudgetTab: React.FC<ProjectBudgetTabProps> = ({ projectId, p
   const [spendPhaseId, setSpendPhaseId] = useState<string>('');
   const [spendDescription, setSpendDescription] = useState<string>('');
   const [submittingSpend, setSubmittingSpend] = useState(false);
-
-  const fetchBudget = async () => {
-    if (isEmployee) {
-      setLoading(false);
-      return;
-    }
-    try {
-      setLoading(true);
-      setError(null);
-      const res = await apiFetch(`/api/projects/${projectId}/budget`);
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || 'Failed to load budget');
-      }
-      const data = await res.json();
-      setBudgetData(data);
-    } catch (err: any) {
-      setError(err.message || 'Error fetching budget');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchBudget();
-  }, [projectId, currentUser]);
 
   const submittingRef = useRef(false);
 
@@ -91,7 +74,7 @@ export const ProjectBudgetTab: React.FC<ProjectBudgetTabProps> = ({ projectId, p
       setSpendAmount('');
       setSpendDescription('');
       setSpendPhaseId('');
-      fetchBudget();
+      invalidateProjectQueries(queryClient, currentUser?.id, projectId, { budget: true });
     } catch (err: any) {
       alert(err.message || 'Failed to record spend');
     } finally {
@@ -140,7 +123,7 @@ export const ProjectBudgetTab: React.FC<ProjectBudgetTabProps> = ({ projectId, p
           <div>
             <h4 className="font-serif font-bold text-sm">Budget Threshold Warning (≥ 90%)</h4>
             <p className="text-xs mt-0.5 leading-relaxed">
-              Spend to date (£{budgetData.spendToDate.toLocaleString()}) has surpassed 90% of the planned baseline budget (£{budgetData.plannedBudget.toLocaleString()}). Contingency reserve activation or CEO budget revision is recommended.
+              Spend to date ({formatCurrency(budgetData.spendToDate)}) has surpassed 90% of the planned baseline budget ({formatCurrency(budgetData.plannedBudget)}). Contingency reserve activation or CEO budget revision is recommended.
             </p>
           </div>
         </div>
@@ -172,17 +155,17 @@ export const ProjectBudgetTab: React.FC<ProjectBudgetTabProps> = ({ projectId, p
         <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-[#E8E2D5] shadow-2xs">
           <div className="text-[10px] sm:text-[11px] font-bold text-[#70685F] uppercase tracking-wider">Planned Budget</div>
           <div className="text-lg sm:text-xl font-serif font-bold text-[#231E1B] mt-1">
-            £{budgetData.plannedBudget.toLocaleString()}
+            {formatCurrency(budgetData.plannedBudget)}
           </div>
           <div className="text-[10px] sm:text-[11px] text-[#70685F] mt-0.5 truncate">
-            + £{budgetData.contingency.toLocaleString()} cont.
+            + {formatCurrency(budgetData.contingency)} cont.
           </div>
         </div>
 
         <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-[#E8E2D5] shadow-2xs">
           <div className="text-[10px] sm:text-[11px] font-bold text-[#70685F] uppercase tracking-wider">Spend to Date</div>
           <div className="text-lg sm:text-xl font-serif font-bold text-[#C85A32] mt-1">
-            £{budgetData.spendToDate.toLocaleString()}
+            {formatCurrency(budgetData.spendToDate)}
           </div>
           <div className="text-[10px] sm:text-[11px] text-[#70685F] mt-0.5">
             {budgetData.spendPercent}% of planned
@@ -192,10 +175,10 @@ export const ProjectBudgetTab: React.FC<ProjectBudgetTabProps> = ({ projectId, p
         <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-[#E8E2D5] shadow-2xs">
           <div className="text-[10px] sm:text-[11px] font-bold text-[#70685F] uppercase tracking-wider">Remaining Funds</div>
           <div className="text-lg sm:text-xl font-serif font-bold text-[#526E55] mt-1">
-            £{budgetData.remaining.toLocaleString()}
+            {formatCurrency(budgetData.remaining)}
           </div>
           <div className="text-[10px] sm:text-[11px] text-[#70685F] mt-0.5 truncate">
-            Total: £{budgetData.totalBudget.toLocaleString()}
+            Total: {formatCurrency(budgetData.totalBudget)}
           </div>
         </div>
 
@@ -206,7 +189,7 @@ export const ProjectBudgetTab: React.FC<ProjectBudgetTabProps> = ({ projectId, p
               budgetData.variance <= 0 ? 'text-[#526E55]' : 'text-[#991B1B]'
             }`}
           >
-            {budgetData.variance >= 0 ? `+£${budgetData.variance.toLocaleString()}` : `-£${Math.abs(budgetData.variance).toLocaleString()}`}
+            {budgetData.variance > 0 ? `+${formatCurrency(budgetData.variance)}` : formatCurrency(budgetData.variance)}
           </div>
           <div className="text-[10px] sm:text-[11px] text-[#70685F] mt-0.5 truncate">
             {budgetData.variance <= 0 ? 'Under pace' : 'Over pace'}
@@ -222,7 +205,7 @@ export const ProjectBudgetTab: React.FC<ProjectBudgetTabProps> = ({ projectId, p
             <span className="text-[10px] sm:text-[11px] text-[#70685F]">(Plan Marker: {budgetData.planPercent}%)</span>
           </div>
           <div className="text-[11px] sm:text-xs text-[#70685F]">
-            Expected spend: <strong className="text-[#231E1B]">£{budgetData.plannedSpendToDate.toLocaleString()}</strong>
+            Expected spend: <strong className="text-[#231E1B]">{formatCurrency(budgetData.plannedSpendToDate)}</strong>
           </div>
         </div>
 
@@ -283,15 +266,15 @@ export const ProjectBudgetTab: React.FC<ProjectBudgetTabProps> = ({ projectId, p
               <div className="grid grid-cols-3 gap-2 sm:gap-4 sm:w-1/2 text-xs bg-[#FAF7F2] sm:bg-transparent p-2.5 sm:p-0 rounded-xl">
                 <div>
                   <div className="text-[9px] sm:text-[10px] text-[#70685F] uppercase font-bold">Planned</div>
-                  <div className="font-semibold text-xs sm:text-sm text-[#231E1B]">£{ph.plannedBudget.toLocaleString()}</div>
+                  <div className="font-semibold text-xs sm:text-sm text-[#231E1B]">{formatCurrency(ph.plannedBudget)}</div>
                 </div>
                 <div>
                   <div className="text-[9px] sm:text-[10px] text-[#70685F] uppercase font-bold">Spent</div>
-                  <div className="font-semibold text-xs sm:text-sm text-[#C85A32]">£{ph.spendToDate.toLocaleString()}</div>
+                  <div className="font-semibold text-xs sm:text-sm text-[#C85A32]">{formatCurrency(ph.spendToDate)}</div>
                 </div>
                 <div>
                   <div className="text-[9px] sm:text-[10px] text-[#70685F] uppercase font-bold">Remaining</div>
-                  <div className="font-semibold text-xs sm:text-sm text-[#526E55]">£{ph.remaining.toLocaleString()}</div>
+                  <div className="font-semibold text-xs sm:text-sm text-[#526E55]">{formatCurrency(ph.remaining)}</div>
                 </div>
               </div>
 
@@ -321,7 +304,7 @@ export const ProjectBudgetTab: React.FC<ProjectBudgetTabProps> = ({ projectId, p
             <form onSubmit={handleRecordSpend} className="space-y-3.5">
               <div>
                 <label className="block text-xs font-semibold text-[#231E1B] mb-1">
-                  Spend Amount (£) *
+                  Spend Amount ({CURRENCY_SYMBOL}) *
                 </label>
                 <input
                   type="number"
@@ -346,7 +329,7 @@ export const ProjectBudgetTab: React.FC<ProjectBudgetTabProps> = ({ projectId, p
                   <option value="">-- Project Level / General --</option>
                   {budgetData.phases.map((ph) => (
                     <option key={ph.id} value={ph.id}>
-                      {ph.name} (Planned: £{ph.plannedBudget.toLocaleString()})
+                      {ph.name} (Planned: {formatCurrency(ph.plannedBudget)})
                     </option>
                   ))}
                 </select>

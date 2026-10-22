@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { apiFetch } from '../lib/api.ts';
+import { useAlertsQuery, useCalendarTodayQuery, useLeaveRequestsQuery, queryKeys } from '../lib/queries.ts';
+import { queryClient } from '../lib/queryClient.ts';
 import {
   AlertItem,
   LeaveRequest,
@@ -57,26 +59,29 @@ interface AlertsViewProps {
 
 export const AlertsView: React.FC<AlertsViewProps> = ({ onSelectProject, onShowCalendar }) => {
   const { currentUser, isCEO } = useAuth();
-  const [data, setData] = useState<{
-    summary: any;
-    dashboardScope?: DashboardScope;
-    dashboardProjects?: DashboardProject[];
-    taskDistribution?: DashboardTaskDistribution;
-    subordinateTasks?: DashboardSubordinateTask[];
-    workloadMetrics?: DashboardWorkloadMetrics;
-    groupedByProject: Record<string, { projectName: string; alerts: AlertItem[] }>;
-    alerts: AlertItem[];
-    myTasks: any[];
-  } | null>(null);
-  const [todayEvents, setTodayEvents] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [todayEventsLoading, setTodayEventsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    data,
+    isLoading: loading,
+    error: alertsError,
+    refetch: fetchAlerts,
+  } = useAlertsQuery(currentUser?.id);
+
+  const {
+    data: todayEvents = [],
+    isLoading: todayEventsLoading,
+    refetch: fetchTodayEvents,
+  } = useCalendarTodayQuery(currentUser?.id);
+
+  const {
+    data: leaveRequests = [],
+    isLoading: leaveLoading,
+    refetch: fetchLeaveRequests,
+  } = useLeaveRequestsQuery(currentUser?.id);
+
+  const error = alertsError ? (alertsError as Error).message : null;
   const [activeFilter, setActiveFilter] = useState<'ALL' | 'CRITICAL' | 'RISKS' | 'MY_TASKS'>('ALL');
 
   // Leave requests (CEO only)
-  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
-  const [leaveLoading, setLeaveLoading] = useState(false);
   const [showLeaveSection, setShowLeaveSection] = useState(true);
   const [decidingLeave, setDecidingLeave] = useState<LeaveRequest | null>(null);
   const [leaveDecisionAction, setLeaveDecisionAction] = useState<'APPROVE' | 'SEND_BACK' | 'REJECT'>('APPROVE');
@@ -84,52 +89,6 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onSelectProject, onShowC
   const [leaveDeciding, setLeaveDeciding] = useState(false);
   const [leaveToast, setLeaveToast] = useState<string | null>(null);
   const submittingRef = useRef(false);
-
-  const fetchAlerts = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const res = await apiFetch('/api/alerts');
-      if (!res.ok) throw new Error('Failed to load attention stream');
-      const json = await res.json();
-      setData(json);
-    } catch (err: any) {
-      setError(err.message || 'Error fetching alerts');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchTodayEvents = async () => {
-    try {
-      setTodayEventsLoading(true);
-      const res = await apiFetch('/api/calendar/today');
-      if (res.ok) {
-        const events = await res.json();
-        setTodayEvents(events);
-      }
-    } catch (err) {
-      // Silent fail for today's events - it's just a preview
-    } finally {
-      setTodayEventsLoading(false);
-    }
-  };
-
-  const fetchLeaveRequests = async () => {
-    if (!currentUser) return;
-    try {
-      setLeaveLoading(true);
-      const res = await apiFetch('/api/leave');
-      if (res.ok) {
-        const data = await res.json();
-        setLeaveRequests(data);
-      }
-    } catch {
-      // silent
-    } finally {
-      setLeaveLoading(false);
-    }
-  };
 
   const handleLeaveDecision = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -158,7 +117,13 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onSelectProject, onShowC
       const actionLabel = leaveDecisionAction === 'APPROVE' ? 'approved' : leaveDecisionAction === 'SEND_BACK' ? 'sent back' : 'declined';
       setLeaveToast(`Leave request ${actionLabel} successfully`);
       setTimeout(() => setLeaveToast(null), 4000);
-      fetchLeaveRequests();
+
+      // Invalidate relevant TanStack queries
+      queryClient.invalidateQueries({ queryKey: queryKeys.leaveRequests(currentUser?.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.alerts(currentUser?.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.badges(currentUser?.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.workload(currentUser?.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.calendar(currentUser?.id) });
     } catch (err: any) {
       setLeaveToast(err.message || 'Failed to process decision');
       setTimeout(() => setLeaveToast(null), 4000);
@@ -167,12 +132,6 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onSelectProject, onShowC
       setLeaveDeciding(false);
     }
   };
-
-  useEffect(() => {
-    fetchAlerts();
-    fetchTodayEvents();
-    fetchLeaveRequests();
-  }, [currentUser]);
 
   const filteredAlerts = (data?.alerts || []).filter((item) => {
     if (activeFilter === 'CRITICAL') return item.category === 'CRITICAL_ISSUE';
@@ -250,7 +209,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onSelectProject, onShowC
           </p>
         </div>
         <button
-          onClick={fetchAlerts}
+          onClick={() => fetchAlerts()}
           className="shrink-0 self-start sm:self-auto px-3.5 py-2 sm:px-4 rounded-full text-xs font-semibold bg-[#F5F1E8] hover:bg-[#EAE4D6] active:scale-95 border border-[#DDD6C8] text-[#5A524A] transition-all cursor-pointer min-h-[36px] sm:min-h-[44px] flex items-center gap-1.5 shadow-2xs"
         >
           <Clock className="w-3.5 h-3.5" />
@@ -712,7 +671,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onSelectProject, onShowC
             <h3 className="font-serif text-base sm:text-lg font-bold text-[#231E1B]">Today's Calendar</h3>
           </div>
           <button
-            onClick={fetchTodayEvents}
+            onClick={() => fetchTodayEvents()}
             className="text-xs text-[#70675D] hover:text-[#C85A32] flex items-center gap-1 cursor-pointer py-1 px-2 rounded-lg hover:bg-[#FAF7F2] transition-colors"
           >
             <Clock className="w-3.5 h-3.5" />
@@ -1134,7 +1093,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onSelectProject, onShowC
         <div className="p-4 rounded-2xl bg-[#FEE2E2] border border-[#FECACA] text-[#991B1B] text-sm flex items-center justify-between">
           <span>{error}</span>
           <button
-            onClick={fetchAlerts}
+            onClick={() => fetchAlerts()}
             className="px-3 py-1 rounded-lg bg-white border border-[#F87171] text-xs font-semibold"
           >
             Retry

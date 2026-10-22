@@ -15,6 +15,9 @@ import {
 import { useAuth } from '../context/AuthContext.tsx';
 import { apiFetch } from '../lib/api.ts';
 import { ApprovalRequest } from '../types.ts';
+import { useProjectApprovalsQuery, invalidateProjectQueries, invalidateApprovalQueries } from '../lib/queries.ts';
+import { queryClient } from '../lib/queryClient.ts';
+import { formatCurrency, CURRENCY_SYMBOL } from '../lib/currency.ts';
 
 interface ProjectApprovalsTabProps {
   projectId: string;
@@ -24,9 +27,14 @@ interface ProjectApprovalsTabProps {
 
 export const ProjectApprovalsTab: React.FC<ProjectApprovalsTabProps> = ({ projectId, projectName, projectOwnerId }) => {
   const { currentUser, isCEO, isEmployee } = useAuth();
-  const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    data: approvals = [],
+    isLoading: loading,
+    error: approvalsErr,
+    refetch: fetchApprovals,
+  } = useProjectApprovalsQuery(projectId, currentUser?.id);
+  const [mutationError, setMutationError] = useState<string | null>(null);
+  const error = mutationError || (approvalsErr ? (approvalsErr as Error).message : null);
 
   // Modals
   const [showNewModal, setShowNewModal] = useState(false);
@@ -50,27 +58,6 @@ export const ProjectApprovalsTab: React.FC<ProjectApprovalsTabProps> = ({ projec
   const [revisedDetail, setRevisedDetail] = useState('');
   const [revisedImpact, setRevisedImpact] = useState('');
   const [processingRevision, setProcessingRevision] = useState(false);
-
-  const fetchApprovals = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const res = await apiFetch(`/api/approvals/project/${projectId}`);
-      if (!res.ok) {
-        throw new Error('Failed to load approvals');
-      }
-      const data = await res.json();
-      setApprovals(data || []);
-    } catch (err: any) {
-      setError(err.message || 'Error fetching approvals');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchApprovals();
-  }, [projectId]);
 
   const submittingRef = useRef(false);
 
@@ -107,7 +94,8 @@ export const ProjectApprovalsTab: React.FC<ProjectApprovalsTabProps> = ({ projec
       setImpact('');
       setRequestedAmount('');
       setMovesBaselinedMilestone(false);
-      fetchApprovals();
+      invalidateApprovalQueries(queryClient, currentUser?.id, projectId);
+      invalidateProjectQueries(queryClient, currentUser?.id, projectId, { approvals: true });
     } catch (err: any) {
       alert(err.message || 'Failed to submit request');
     } finally {
@@ -140,7 +128,8 @@ export const ProjectApprovalsTab: React.FC<ProjectApprovalsTabProps> = ({ projec
 
       setDecidingRequest(null);
       setDecisionNote('');
-      fetchApprovals();
+      invalidateApprovalQueries(queryClient, currentUser?.id, projectId);
+      invalidateProjectQueries(queryClient, currentUser?.id, projectId, { approvals: true });
     } catch (err: any) {
       alert(err.message || 'Decision failed');
     } finally {
@@ -173,7 +162,8 @@ export const ProjectApprovalsTab: React.FC<ProjectApprovalsTabProps> = ({ projec
       }
 
       setRevisingRequest(null);
-      fetchApprovals();
+      invalidateApprovalQueries(queryClient, currentUser?.id, projectId);
+      invalidateProjectQueries(queryClient, currentUser?.id, projectId, { approvals: true });
     } catch (err: any) {
       alert(err.message || 'Resubmit failed');
     } finally {
@@ -381,7 +371,7 @@ export const ProjectApprovalsTab: React.FC<ProjectApprovalsTabProps> = ({ projec
               {requestType === 'Budget' && (
                 <div>
                   <label className="block text-xs font-semibold text-[#231E1B] mb-1">
-                    Requested Amount (£) *
+                    Requested Amount ({CURRENCY_SYMBOL}) *
                   </label>
                   <input
                     type="number"
@@ -393,7 +383,7 @@ export const ProjectApprovalsTab: React.FC<ProjectApprovalsTabProps> = ({ projec
                     className="w-full bg-[#FAF7F2] border border-[#DDD6C8] rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-[#231E1B] focus:ring-1 focus:ring-[#C85A32] min-h-[44px]"
                   />
                   <p className="text-[10px] sm:text-[11px] text-[#70685F] mt-1">
-                    Budget increases exceeding contingency or over £50,000 route strictly to the CEO.
+                    Budget increases exceeding contingency or over {formatCurrency(50000, { maximumFractionDigits: 0, minimumFractionDigits: 0 })} route strictly to the CEO.
                   </p>
                 </div>
               )}
@@ -410,7 +400,7 @@ export const ProjectApprovalsTab: React.FC<ProjectApprovalsTabProps> = ({ projec
                   <label htmlFor="chk-baselined" className="text-xs text-[#231E1B] leading-snug cursor-pointer">
                     <strong>Moves a baselined milestone</strong>
                     <div className="text-[10px] sm:text-[11px] text-[#70685F]">
-                      Timeline changes affecting baselined milestones escalate to Sponsor and CEO.
+                      Timeline changes affecting baselined milestones escalate to Client and CEO.
                     </div>
                   </label>
                 </div>

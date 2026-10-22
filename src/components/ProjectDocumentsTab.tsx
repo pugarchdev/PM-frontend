@@ -10,10 +10,14 @@ import {
   X,
   File,
   RefreshCw,
+  Search,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { apiFetch, apiUrl } from '../lib/api.ts';
+import { useDebounce } from '../lib/useDebounce.ts';
 import { DocumentItem } from '../types.ts';
+import { useProjectDocumentsQuery, invalidateProjectQueries } from '../lib/queries.ts';
+import { queryClient } from '../lib/queryClient.ts';
 
 interface ProjectDocumentsTabProps {
   projectId: string;
@@ -22,9 +26,37 @@ interface ProjectDocumentsTabProps {
 
 export const ProjectDocumentsTab: React.FC<ProjectDocumentsTabProps> = ({ projectId, projectName }) => {
   const { currentUser } = useAuth();
-  const [documents, setDocuments] = useState<DocumentItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebounce(searchQuery, 300);
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 10;
+
+  const {
+    data: documents = [],
+    isLoading: loading,
+    error: docsErr,
+    refetch: fetchDocuments,
+  } = useProjectDocumentsQuery(projectId, currentUser?.id);
+  const [mutationError, setMutationError] = useState<string | null>(null);
+  const error = mutationError || (docsErr ? (docsErr as Error).message : null);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [debouncedSearch]);
+
+  const filteredDocuments = documents.filter((doc) => {
+    if (!debouncedSearch) return true;
+    const q = debouncedSearch.toLowerCase();
+    return (
+      doc.title.toLowerCase().includes(q) ||
+      (doc.description && doc.description.toLowerCase().includes(q)) ||
+      (doc.fileType && doc.fileType.toLowerCase().includes(q)) ||
+      (doc.uploader?.name && doc.uploader.name.toLowerCase().includes(q))
+    );
+  });
+
+  const totalPages = Math.ceil(filteredDocuments.length / pageSize) || 1;
+  const paginatedDocuments = filteredDocuments.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   // Upload modal
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -48,28 +80,6 @@ export const ProjectDocumentsTab: React.FC<ProjectDocumentsTabProps> = ({ projec
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const versionInputRef = useRef<HTMLInputElement | null>(null);
-
-  const fetchDocuments = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const res = await apiFetch(`/api/projects/${projectId}/documents`);
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Failed to load project documents');
-      }
-      const data = await res.json();
-      setDocuments(data || []);
-    } catch (err: any) {
-      setError(err.message || 'Error fetching documents');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchDocuments();
-  }, [projectId]);
 
   const handleFileDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -140,7 +150,7 @@ export const ProjectDocumentsTab: React.FC<ProjectDocumentsTabProps> = ({ projec
       setDocDescription('');
       setUploadComment('');
       setUploadProgress(0);
-      fetchDocuments();
+      invalidateProjectQueries(queryClient, currentUser?.id, projectId, { documents: true });
     } catch (err: any) {
       setUploadError(err.message || 'Upload failed. Please retry.');
     } finally {
@@ -176,7 +186,7 @@ export const ProjectDocumentsTab: React.FC<ProjectDocumentsTabProps> = ({ projec
       setTargetDoc(null);
       setVersionFile(null);
       setVersionComment('');
-      fetchDocuments();
+      invalidateProjectQueries(queryClient, currentUser?.id, projectId, { documents: true });
     } catch (err: any) {
       setVersionError(err.message || 'Version upload failed');
     } finally {
@@ -214,6 +224,33 @@ export const ProjectDocumentsTab: React.FC<ProjectDocumentsTabProps> = ({ projec
         </button>
       </div>
 
+      {documents.length > 0 && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="relative flex-1 max-w-md">
+            <Search className="w-4 h-4 text-[#8C8275] absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Search documents by title, uploader, or type..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-9 py-2 rounded-xl border border-[#DDD6C8] bg-white text-xs text-[#231E1B] placeholder-[#8F867A] focus:outline-hidden focus:border-[#C85A32]"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8F867A] hover:text-[#231E1B] cursor-pointer"
+                title="Clear search"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+          <span className="text-xs font-semibold text-[#70685F]">
+            Showing {filteredDocuments.length} of {documents.length} documents
+          </span>
+        </div>
+      )}
+
       {loading ? (
         <div className="py-20 text-center text-xs text-[#70685F]">Loading document repository...</div>
       ) : error ? (
@@ -234,9 +271,13 @@ export const ProjectDocumentsTab: React.FC<ProjectDocumentsTabProps> = ({ projec
             Upload First Document
           </button>
         </div>
+      ) : filteredDocuments.length === 0 ? (
+        <div className="py-12 text-center text-xs text-[#70685F] bg-[#FAF8F4] rounded-2xl border border-dashed border-[#DDD6C8]">
+          No documents found matching "{searchQuery}".
+        </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 sm:gap-4">
-          {documents.map((doc) => {
+          {paginatedDocuments.map((doc) => {
             const latestVersion = doc.versions[0];
             return (
               <div
@@ -311,6 +352,31 @@ export const ProjectDocumentsTab: React.FC<ProjectDocumentsTabProps> = ({ projec
               </div>
             );
           })}
+        </div>
+      )}
+
+      {filteredDocuments.length > pageSize && (
+        <div className="flex items-center justify-between pt-4 border-t border-[#EDE7DC] text-xs text-[#70685F]">
+          <div>
+            Page <span className="font-semibold text-[#231E1B]">{currentPage}</span> of{' '}
+            <span className="font-semibold text-[#231E1B]">{totalPages}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              disabled={currentPage <= 1}
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              className="px-3 py-1.5 rounded-lg border border-[#DDD6C8] bg-white hover:bg-[#FAF8F4] disabled:opacity-40 disabled:cursor-not-allowed font-medium text-[#231E1B] cursor-pointer transition-colors"
+            >
+              Previous
+            </button>
+            <button
+              disabled={currentPage >= totalPages}
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              className="px-3 py-1.5 rounded-lg border border-[#DDD6C8] bg-white hover:bg-[#FAF8F4] disabled:opacity-40 disabled:cursor-not-allowed font-medium text-[#231E1B] cursor-pointer transition-colors"
+            >
+              Next
+            </button>
+          </div>
         </div>
       )}
 

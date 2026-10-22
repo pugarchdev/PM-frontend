@@ -20,10 +20,14 @@ import {
   Plus,
   ArrowUpDown,
   ChevronDown,
+  X,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api.ts';
 import { useAuth } from '../context/AuthContext.tsx';
 import { RoleDefinition } from '../types.ts';
+import { useUsersManagementQuery, useUsersSummaryQuery, useRolesQuery, invalidateUserQueries } from '../lib/queries.ts';
+import { queryClient } from '../lib/queryClient.ts';
+import { useDebounce } from '../lib/useDebounce.ts';
 
 interface ManagedUser {
   id: string;
@@ -48,7 +52,7 @@ export const UserManagementView: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { id: routeUserId } = useParams<{ id: string }>();
-  const { preRegisterUser, isExecutive, canManageUsers } = useAuth();
+  const { currentUser, preRegisterUser, isExecutive, canManageUsers } = useAuth();
 
   // Determine active tab based on route pathname
   const isCreateRoute = location.pathname === '/users/register';
@@ -62,11 +66,30 @@ export const UserManagementView: React.FC = () => {
     isPendingRoute ? 'pending' : 'all'
   );
 
-  const [users, setUsers] = useState<ManagedUser[]>([]);
-  const [roles, setRoles] = useState<RoleDefinition[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebounce(searchQuery, 300);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  const { data: summaryData } = useUsersSummaryQuery(currentUser?.id);
+  const { data: usersData = [], isLoading: usersLoading, error: usersErr } = useUsersManagementQuery(
+    currentUser?.id,
+    {
+      search: debouncedSearch,
+      status: statusFilter !== 'all' ? statusFilter : undefined,
+    }
+  );
+  const { data: rolesData = [], isLoading: rolesLoading } = useRolesQuery(currentUser?.id);
+
+  const users = usersData as ManagedUser[];
+  const roles = rolesData as RoleDefinition[];
+  const loading = usersLoading || rolesLoading;
+  const [mutationError, setMutationError] = useState<string | null>(null);
+  const error = mutationError || (usersErr ? (usersErr as Error).message : null);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [debouncedSearch, statusFilter]);
   const [selectedUserDetail, setSelectedUserDetail] = useState<ManagedUser | null>(null);
 
   // Pre-registration form state
@@ -98,40 +121,15 @@ export const UserManagementView: React.FC = () => {
   const [reassignFeedback, setReassignFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const fetchUsersAndRoles = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const [usersRes, rolesRes] = await Promise.all([
-        apiFetch('/api/users/management'),
-        apiFetch('/api/roles'),
-      ]);
-
-      if (!usersRes.ok) {
-        const data = await usersRes.json().catch(() => ({}));
-        throw new Error(data.error || 'Failed to load user directory');
-      }
-      const userData = await usersRes.json();
-      setUsers(userData);
-
-      if (rolesRes.ok) {
-        const rolesData = await rolesRes.json();
-        setRoles(rolesData);
-        if (rolesData.length > 0 && !formRoleId) {
-          const defaultRole = rolesData.find((r: any) => r.name === 'Employee') || rolesData[rolesData.length - 1];
-          setFormRoleId(defaultRole.id);
-        }
-      }
-    } catch (err: any) {
-      setError(err.message || 'Failed to fetch users and roles');
-    } finally {
-      setLoading(false);
-    }
+    invalidateUserQueries(queryClient, currentUser?.id);
   };
 
   useEffect(() => {
-    fetchUsersAndRoles();
-  }, []);
+    if (roles.length > 0 && !formRoleId) {
+      const defaultRole = roles.find((r: any) => r.name === 'Employee') || roles[roles.length - 1];
+      setFormRoleId(defaultRole.id);
+    }
+  }, [roles, formRoleId]);
 
   // Sync tab and filter when route changes
   useEffect(() => {
@@ -346,6 +344,9 @@ export const UserManagementView: React.FC = () => {
     return true;
   });
 
+  const totalPages = Math.ceil(filteredUsers.length / pageSize) || 1;
+  const paginatedUsers = filteredUsers.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
   const pendingCount = users.filter((u) => !u.isSignupCompleted).length;
 
   return (
@@ -388,7 +389,7 @@ export const UserManagementView: React.FC = () => {
             }`}
           >
             <Users className="w-3.5 h-3.5" />
-            All Directory ({users.length})
+            All Directory ({summaryData?.totalUsers ?? users.length})
           </button>
 
           <button
@@ -405,7 +406,7 @@ export const UserManagementView: React.FC = () => {
             }`}
           >
             <Clock className="w-3.5 h-3.5" />
-            Pending ({pendingCount})
+            Pending ({summaryData?.pendingUsers ?? pendingCount})
           </button>
 
           <button
@@ -456,12 +457,34 @@ export const UserManagementView: React.FC = () => {
                   placeholder="Search by name, email, phone, role, or department..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-[#DDD6C8] bg-white text-xs text-[#231E1B] placeholder-[#8F867A] focus:outline-hidden focus:border-[#C85A32]"
+                  className="w-full pl-10 pr-9 py-2.5 rounded-xl border border-[#DDD6C8] bg-white text-xs text-[#231E1B] placeholder-[#8F867A] focus:outline-hidden focus:border-[#C85A32]"
                 />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-3 top-3 text-[#8F867A] hover:text-[#231E1B] cursor-pointer"
+                    title="Clear search"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
               </div>
 
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-[#70685F]">
+              <div className="flex items-center gap-3">
+                <select
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setCurrentPage(1);
+                  }}
+                  className="px-2.5 py-2 rounded-xl border border-[#DDD6C8] bg-white text-xs text-[#231E1B] focus:outline-hidden focus:border-[#C85A32] cursor-pointer"
+                >
+                  <option value={10}>10 / page</option>
+                  <option value={20}>20 / page</option>
+                  <option value={50}>50 / page</option>
+                </select>
+
+                <span className="text-xs font-semibold text-[#70685F] whitespace-nowrap">
                   Showing {filteredUsers.length} of {users.length} members
                 </span>
               </div>
@@ -480,7 +503,7 @@ export const UserManagementView: React.FC = () => {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {filteredUsers.map((u) => {
+                {paginatedUsers.map((u) => {
                   const roleRank = u.roleDefinition?.rank ?? u.roleRank ?? (u.role === 'CEO' ? 1 : u.role === 'CTO' ? 2 : u.role === 'Intern' ? 4 : 3);
                   const isExec = u.roleDefinition?.isExecutive ?? (u.role === 'CEO');
 
@@ -576,6 +599,31 @@ export const UserManagementView: React.FC = () => {
                     </div>
                   );
                 })}
+              </div>
+            )}
+
+            {filteredUsers.length > pageSize && (
+              <div className="flex items-center justify-between pt-4 border-t border-[#EDE7DC] text-xs text-[#70685F]">
+                <div>
+                  Page <span className="font-semibold text-[#231E1B]">{currentPage}</span> of{' '}
+                  <span className="font-semibold text-[#231E1B]">{totalPages}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    disabled={currentPage <= 1}
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    className="px-3 py-1.5 rounded-lg border border-[#DDD6C8] bg-white hover:bg-[#FAF8F4] disabled:opacity-40 disabled:cursor-not-allowed font-medium text-[#231E1B] cursor-pointer transition-colors"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    disabled={currentPage >= totalPages}
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    className="px-3 py-1.5 rounded-lg border border-[#DDD6C8] bg-white hover:bg-[#FAF8F4] disabled:opacity-40 disabled:cursor-not-allowed font-medium text-[#231E1B] cursor-pointer transition-colors"
+                  >
+                    Next
+                  </button>
+                </div>
               </div>
             )}
           </div>

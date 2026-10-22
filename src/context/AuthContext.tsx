@@ -2,6 +2,8 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User } from '../types.ts';
 import { apiFetch } from '../lib/api.ts';
 import { getSocket } from '../lib/socket.ts';
+import { queryClient } from '../lib/queryClient.ts';
+import { invalidateUserQueries } from '../lib/queries.ts';
 
 interface AuthContextType {
   currentUser: User | null;
@@ -83,6 +85,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!res.ok) {
         return { success: false, error: data.error || 'Authentication failed' };
       }
+      queryClient.clear();
       setCurrentUser(data.user);
       if (data.user?.id) {
         getSocket(data.user.id);
@@ -269,6 +272,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!res.ok) {
         return { success: false, error: resData.error || 'Failed to pre-register user' };
       }
+      invalidateUserQueries(queryClient, currentUser?.id);
       return { success: true, user: resData.user };
     } catch (err: any) {
       return { success: false, error: err.message || 'Pre-registration failed' };
@@ -296,6 +300,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setCurrentUser(resData.user);
       }
       // Re-fetch session so directory, top navigation and socket are kept in sync
+      invalidateUserQueries(queryClient, currentUser?.id);
       await fetchSession();
       return { success: true, user: resData.user };
     } catch (err: any) {
@@ -308,6 +313,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = async (): Promise<void> => {
     try {
       setIsLoading(true);
+      queryClient.clear();
       await apiFetch('/api/auth/logout', { method: 'POST' });
       setCurrentUser(null);
       await fetchSession();
@@ -319,6 +325,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const switchUser = async (userId: string) => {
+    queryClient.clear();
     await login({ userId });
   };
 

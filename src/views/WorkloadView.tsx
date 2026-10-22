@@ -1,6 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { apiFetch } from '../lib/api.ts';
+import {
+  useWorkloadQuery,
+  useWorkloadSummaryQuery,
+  useProjectsMinimalQuery,
+  useLeaveRequestsQuery,
+  useDesignatedApproverQuery,
+  queryKeys,
+  invalidateTaskQueries,
+  invalidateLeaveQueries,
+} from '../lib/queries.ts';
+import { queryClient } from '../lib/queryClient.ts';
+import { useDebounce } from '../lib/useDebounce.ts';
 import { WorkloadMember, Project, LeaveRequest, LeaveType, DayType } from '../types.ts';
 import {
   Users,
@@ -17,6 +29,8 @@ import {
   FileText,
   ChevronDown,
   UserPlus,
+  Search,
+  ChevronLeft,
 } from 'lucide-react';
 import { UserManagementModal } from '../components/UserManagementModal.tsx';
 
@@ -40,27 +54,49 @@ const fmt = (date: string) =>
 
 export const WorkloadView: React.FC = () => {
   const { currentUser, isCEO, isProjectOwner } = useAuth();
-  const [data, setData] = useState<{
-    weekStartDate: string;
-    summary: {
-      totalTeam: number;
-      overallocatedCount: number;
-      balancedCount: number;
-      availableCount: number;
-      teamOnLeaveCount?: number;
-      schedulingConflictsCount?: number;
-    };
-    scope?: {
-      isExecutive: boolean;
-      subordinatesCount: number;
-      visibleUserCount: number;
-    };
-    workload: WorkloadMember[];
-  } | null>(null);
 
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // Search & Filter state
+  const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebounce(searchQuery, 300);
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  // Reset page when search or status filter changes
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, statusFilter]);
+
+  // Fast independent summary query for KPI cards
+  const {
+    data: summaryData,
+    isLoading: summaryLoading,
+  } = useWorkloadSummaryQuery(currentUser?.id);
+
+  // Filtered & paginated member workload query
+  const {
+    data,
+    isLoading: loading,
+    error: workloadError,
+    refetch: fetchWorkload,
+  } = useWorkloadQuery(currentUser?.id, undefined, {
+    search: debouncedSearch,
+    status: statusFilter,
+    page,
+    limit: pageSize,
+  });
+
+  const {
+    data: projects = [],
+  } = useProjectsMinimalQuery(currentUser?.id);
+
+  const {
+    data: myLeave = [],
+    isLoading: leaveLoading,
+    refetch: fetchMyLeave,
+  } = useLeaveRequestsQuery(currentUser?.id, 'mine');
+
+  const error = workloadError ? (workloadError as Error).message : null;
 
   // Allocation modal
   const [showAllocateModal, setShowAllocateModal] = useState(false);
@@ -71,10 +107,8 @@ export const WorkloadView: React.FC = () => {
   const [toast, setToast] = useState<string | null>(null);
 
   // Leave request & designated approver
-  const [myLeave, setMyLeave] = useState<LeaveRequest[]>([]);
-  const [leaveLoading, setLeaveLoading] = useState(false);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
-  const [designatedApprover, setDesignatedApprover] = useState<{ id: string; name: string; role: string } | null>(null);
+  const { data: designatedApprover = null } = useDesignatedApproverQuery(currentUser?.id);
   const [leaveForm, setLeaveForm] = useState({
     startDate: '',
     endDate: '',
@@ -85,65 +119,11 @@ export const WorkloadView: React.FC = () => {
   const [leaveSubmitting, setLeaveSubmitting] = useState(false);
   const [showMyLeave, setShowMyLeave] = useState(true);
 
-  const fetchWorkload = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const [wRes, pRes] = await Promise.all([
-        apiFetch('/api/workload'),
-        apiFetch('/api/projects'),
-      ]);
-
-      if (!wRes.ok) throw new Error('Failed to load workload statistics');
-      const wData = await wRes.json();
-      const pData = await pRes.json();
-
-      setData(wData);
-      setProjects(pData);
-      if (pData.length > 0 && !allocateProjectId) {
-        setAllocateProjectId(pData[0].id);
-      }
-    } catch (err: any) {
-      setError(err.message || 'Error loading workload');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchMyLeave = async () => {
-    if (!currentUser) return;
-    try {
-      setLeaveLoading(true);
-      const res = await apiFetch('/api/leave?scope=mine');
-      if (res.ok) {
-        const data = await res.json();
-        setMyLeave(data);
-      }
-    } catch {
-      // silent
-    } finally {
-      setLeaveLoading(false);
-    }
-  };
-
-  const fetchApprover = async () => {
-    if (!currentUser) return;
-    try {
-      const res = await apiFetch('/api/leave/approver');
-      if (res.ok) {
-        const json = await res.json();
-        setDesignatedApprover(json.approver);
-      }
-    } catch {
-      // silent
-    }
-  };
-
   useEffect(() => {
-    fetchWorkload();
-    fetchMyLeave();
-    fetchApprover();
-  }, [currentUser]);
+    if (projects.length > 0 && !allocateProjectId) {
+      setAllocateProjectId(projects[0].id);
+    }
+  }, [projects, allocateProjectId]);
 
   const [allocating, setAllocating] = useState(false);
   const submittingRef = useRef(false);
@@ -170,7 +150,7 @@ export const WorkloadView: React.FC = () => {
       setShowAllocateModal(false);
       setToast(`Allocated ${allocateHours}h to ${selectedUser.user.name}`);
       setTimeout(() => setToast(null), 4000);
-      fetchWorkload();
+      invalidateTaskQueries(queryClient, currentUser?.id, allocateProjectId);
     } catch (err: any) {
       setToast(err.message);
       setTimeout(() => setToast(null), 4000);
@@ -202,7 +182,10 @@ export const WorkloadView: React.FC = () => {
       setLeaveForm({ startDate: '', endDate: '', dayType: 'Full day', leaveType: 'Annual Leave', reason: '' });
       setToast('Leave request submitted successfully');
       setTimeout(() => setToast(null), 4000);
-      fetchMyLeave();
+      invalidateLeaveQueries(queryClient, currentUser?.id);
+      queryClient.invalidateQueries({ queryKey: queryKeys.alerts(currentUser?.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.badges(currentUser?.id) });
+      queryClient.invalidateQueries({ queryKey: ['calendar-events', currentUser?.id] });
     } catch (err: any) {
       setToast(err.message || 'Failed to submit leave request');
       setTimeout(() => setToast(null), 4000);
@@ -222,7 +205,10 @@ export const WorkloadView: React.FC = () => {
       }
       setToast('Leave request withdrawn');
       setTimeout(() => setToast(null), 3000);
-      fetchMyLeave();
+      invalidateLeaveQueries(queryClient, currentUser?.id);
+      queryClient.invalidateQueries({ queryKey: queryKeys.alerts(currentUser?.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.badges(currentUser?.id) });
+      queryClient.invalidateQueries({ queryKey: ['calendar-events', currentUser?.id] });
     } catch (err: any) {
       setToast(err.message);
       setTimeout(() => setToast(null), 4000);
@@ -390,9 +376,24 @@ export const WorkloadView: React.FC = () => {
           )}
         </div>
 
-      {/* Summary KPI cards */}
-      {data?.summary && (
-        !isCEO && data?.scope && !data.scope.isExecutive && data.scope.subordinatesCount === 0 ? (
+      {/* Summary KPI cards (Independent loading state) */}
+      {(() => {
+        const activeSummary = summaryData?.summary || data?.summary;
+        const activeScope = summaryData?.scope || data?.scope;
+
+        if (summaryLoading && !activeSummary) {
+          return (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3.5">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="p-4 rounded-2xl bg-white border border-[#EAE3D5] shadow-xs animate-pulse h-24" />
+              ))}
+            </div>
+          );
+        }
+
+        if (!activeSummary) return null;
+
+        return !isCEO && activeScope && !activeScope.isExecutive && activeScope.subordinatesCount === 0 ? (
           /* Personal Capacity Strip for Individual Contributors (Employees / Interns) */
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3.5">
             <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-[#EAE3D5] shadow-xs flex flex-col justify-between">
@@ -400,10 +401,10 @@ export const WorkloadView: React.FC = () => {
                 Your Allocated Load
               </span>
               <div className="mt-1 text-xl sm:text-2xl font-bold font-serif text-[#231E1B]">
-                {data.workload[0]?.allocatedHours ?? 0} hrs
+                {data?.workload?.[0]?.allocatedHours ?? 0} hrs
               </div>
               <span className="text-[10px] sm:text-[11px] text-[#70675D] truncate">
-                {data.workload[0]?.workloadPercentage ?? 0}% capacity
+                {data?.workload?.[0]?.workloadPercentage ?? 0}% capacity
               </span>
             </div>
 
@@ -418,9 +419,9 @@ export const WorkloadView: React.FC = () => {
             </div>
 
             <div className={`p-3.5 sm:p-4 rounded-2xl bg-white border shadow-xs flex flex-col justify-between ${
-              data.workload[0]?.status === 'OVER'
+              data?.workload?.[0]?.status === 'OVER'
                 ? 'border-[#FECACA]'
-                : data.workload[0]?.status === 'BALANCED'
+                : data?.workload?.[0]?.status === 'BALANCED'
                 ? 'border-[#FDE68A]'
                 : 'border-[#C6DEC7]'
             }`}>
@@ -428,13 +429,13 @@ export const WorkloadView: React.FC = () => {
                 Capacity Status
               </span>
               <div className={`mt-1 text-xl sm:text-2xl font-bold font-serif ${
-                data.workload[0]?.status === 'OVER'
+                data?.workload?.[0]?.status === 'OVER'
                   ? 'text-[#991B1B]'
-                  : data.workload[0]?.status === 'BALANCED'
+                  : data?.workload?.[0]?.status === 'BALANCED'
                   ? 'text-[#92400E]'
                   : 'text-[#2D5A34]'
               }`}>
-                {data.workload[0]?.statusLabel ?? 'Available'}
+                {data?.workload?.[0]?.statusLabel ?? 'Available'}
               </div>
               <span className="text-[10px] sm:text-[11px] text-[#70675D] truncate">Standard reference</span>
             </div>
@@ -444,7 +445,7 @@ export const WorkloadView: React.FC = () => {
                 Active Tasks
               </span>
               <div className="mt-1 text-xl sm:text-2xl font-bold font-serif text-[#231E1B]">
-                {data.workload[0]?.activeTasksCount ?? 0}
+                {data?.workload?.[0]?.activeTasksCount ?? 0}
               </div>
               <span className="text-[10px] sm:text-[11px] text-[#70675D] truncate">
                 In authorized projects
@@ -460,7 +461,7 @@ export const WorkloadView: React.FC = () => {
                   Active Team
                 </span>
                 <div className="mt-1 text-xl sm:text-2xl font-bold font-serif text-[#231E1B]">
-                  {data.summary.totalTeam}
+                  {activeSummary.totalTeam}
                 </div>
                 <span className="text-[10px] sm:text-[11px] text-[#70675D] truncate">Staff members</span>
               </div>
@@ -470,7 +471,7 @@ export const WorkloadView: React.FC = () => {
                   Overallocated
                 </span>
                 <div className="mt-1 text-xl sm:text-2xl font-bold font-serif text-[#991B1B]">
-                  {data.summary.overallocatedCount}
+                  {activeSummary.overallocatedCount}
                 </div>
                 <span className="text-[10px] sm:text-[11px] text-[#991B1B] truncate">&gt; 100% capacity</span>
               </div>
@@ -480,7 +481,7 @@ export const WorkloadView: React.FC = () => {
                   Balanced
                 </span>
                 <div className="mt-1 text-xl sm:text-2xl font-bold font-serif text-[#92400E]">
-                  {data.summary.balancedCount}
+                  {activeSummary.balancedCount}
                 </div>
                 <span className="text-[10px] sm:text-[11px] text-[#92400E] truncate">70% – 100% load</span>
               </div>
@@ -490,36 +491,88 @@ export const WorkloadView: React.FC = () => {
                   Available
                 </span>
                 <div className="mt-1 text-xl sm:text-2xl font-bold font-serif text-[#2D5A34]">
-                  {data.summary.availableCount}
+                  {activeSummary.availableCount}
                 </div>
                 <span className="text-[10px] sm:text-[11px] text-[#2D5A34] truncate">&lt; 70% capacity</span>
               </div>
             </div>
 
-            {(data.summary.teamOnLeaveCount !== undefined && (data.summary.teamOnLeaveCount > 0 || (data.summary.schedulingConflictsCount ?? 0) > 0)) && (
+            {(activeSummary.teamOnLeaveCount !== undefined && (activeSummary.teamOnLeaveCount > 0 || (activeSummary.schedulingConflictsCount ?? 0) > 0)) && (
               <div className="flex flex-wrap items-center gap-2.5 p-3 bg-white border border-[#EAE3D5] rounded-2xl shadow-xs text-xs">
-                {data.summary.teamOnLeaveCount > 0 && (
+                {activeSummary.teamOnLeaveCount > 0 && (
                   <span className="flex items-center gap-1.5 font-semibold text-[#2D5A34] bg-[#EBF2EB] px-3 py-1 rounded-xl border border-[#C6DEC7]">
                     <Plane className="w-3.5 h-3.5 text-[#2D5A34]" />
-                    {data.summary.teamOnLeaveCount} member(s) with approved leave this week
+                    {activeSummary.teamOnLeaveCount} member(s) with approved leave this week
                   </span>
                 )}
-                {(data.summary.schedulingConflictsCount ?? 0) > 0 && (
+                {(activeSummary.schedulingConflictsCount ?? 0) > 0 && (
                   <span className="flex items-center gap-1.5 font-semibold text-[#991B1B] bg-[#FEE2E2] px-3 py-1 rounded-xl border border-[#FECACA]">
                     <AlertTriangle className="w-3.5 h-3.5 text-[#991B1B]" />
-                    {data.summary.schedulingConflictsCount} scheduling conflict(s) detected with active tasks
+                    {activeSummary.schedulingConflictsCount} scheduling conflict(s) detected with active tasks
                   </span>
                 )}
               </div>
             )}
           </div>
-        )
-      )}
+        );
+      })()}
 
-      {/* Loading */}
+      {/* Search and Filters Toolbar */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3.5 bg-white rounded-2xl border border-[#EAE3D5] shadow-xs">
+        <div className="relative flex-1">
+          <Search className="w-4 h-4 text-[#8C8275] absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            id="workload-search-input"
+            type="text"
+            placeholder="Search by member name, email, or department..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-9 pr-8 py-2 rounded-xl bg-[#FAF8F4] border border-[#DDD6C8] text-xs text-[#231E1B] placeholder-[#8C8275] focus:outline-hidden focus:border-[#C85A32] focus:bg-white transition-all"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#8C8275] hover:text-[#231E1B] p-0.5 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <select
+            id="workload-status-filter"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="px-3 py-2 rounded-xl bg-[#FAF8F4] border border-[#DDD6C8] text-xs font-semibold text-[#231E1B] focus:outline-hidden focus:border-[#C85A32] cursor-pointer"
+          >
+            <option value="ALL">All Workload Statuses</option>
+            <option value="OVER">Overallocated (&gt; 100%)</option>
+            <option value="BALANCED">Balanced (70% – 100%)</option>
+            <option value="AVAILABLE">Available (&lt; 70%)</option>
+            <option value="ON_LEAVE">On Approved Leave</option>
+          </select>
+
+          <select
+            id="workload-page-size-select"
+            value={pageSize}
+            onChange={(e) => {
+              setPageSize(Number(e.target.value));
+              setPage(1);
+            }}
+            className="px-2.5 py-2 rounded-xl bg-[#FAF8F4] border border-[#DDD6C8] text-xs font-semibold text-[#231E1B] focus:outline-hidden focus:border-[#C85A32] cursor-pointer"
+          >
+            <option value={10}>10 / page</option>
+            <option value={25}>25 / page</option>
+            <option value={50}>50 / page</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Loading state for member cards */}
       {loading && (
         <div className="space-y-3">
-          {[1, 2, 3, 4].map((i) => (
+          {[1, 2, 3].map((i) => (
             <div
               key={i}
               className="p-5 rounded-2xl bg-white/70 border border-[#EAE3D5] animate-pulse space-y-3"
@@ -531,18 +584,37 @@ export const WorkloadView: React.FC = () => {
         </div>
       )}
 
-      {/* Error */}
+      {/* Error state */}
       {error && (
         <div className="p-4 rounded-2xl bg-[#FEE2E2] border border-[#FECACA] text-[#991B1B] text-sm flex items-center justify-between">
           <span>{error}</span>
-          <button onClick={fetchWorkload} className="px-3 py-1 bg-white rounded-lg text-xs font-semibold">
+          <button onClick={() => fetchWorkload()} className="px-3 py-1 bg-white rounded-lg text-xs font-semibold">
             Retry
           </button>
         </div>
       )}
 
+      {/* Empty State */}
+      {!loading && !error && data?.workload && data.workload.length === 0 && (
+        <div className="p-8 rounded-2xl bg-white border border-[#EAE3D5] text-center space-y-2">
+          <Users className="w-8 h-8 text-[#DDD6C8] mx-auto" />
+          <p className="text-xs text-[#70685F]">No workload members match the selected criteria.</p>
+          {(searchQuery || statusFilter !== 'ALL') && (
+            <button
+              onClick={() => {
+                setSearchQuery('');
+                setStatusFilter('ALL');
+              }}
+              className="text-xs font-semibold text-[#C85A32] hover:underline cursor-pointer"
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Workload Team Cards */}
-      {!loading && !error && data?.workload && (
+      {!loading && !error && data?.workload && data.workload.length > 0 && (
         <div className="space-y-3.5 sm:space-y-4">
           {data.workload.map((member) => {
             const isOver = member.status === 'OVER';
@@ -700,6 +772,38 @@ export const WorkloadView: React.FC = () => {
               </div>
             );
           })}
+
+          {/* Pagination Controls */}
+          {data?.pagination && data.pagination.totalPages > 1 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-[#EAE3D5]">
+              <span className="text-xs text-[#70675D]">
+                Showing <strong className="text-[#231E1B]">{(page - 1) * pageSize + 1}</strong> –{' '}
+                <strong className="text-[#231E1B]">{Math.min(page * pageSize, data.pagination.total)}</strong> of{' '}
+                <strong className="text-[#231E1B]">{data.pagination.total}</strong> team members
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  id="workload-prev-page-btn"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  className="px-3 py-1.5 rounded-xl border border-[#DDD6C8] bg-white text-xs font-semibold text-[#231E1B] hover:bg-[#FAF6EE] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 cursor-pointer"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" /> Prev
+                </button>
+                <span className="text-xs font-semibold text-[#231E1B] px-2">
+                  Page {page} of {data.pagination.totalPages}
+                </span>
+                <button
+                  id="workload-next-page-btn"
+                  onClick={() => setPage((p) => Math.min(data.pagination!.totalPages, p + 1))}
+                  disabled={page >= data.pagination.totalPages}
+                  className="px-3 py-1.5 rounded-xl border border-[#DDD6C8] bg-white text-xs font-semibold text-[#231E1B] hover:bg-[#FAF6EE] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 cursor-pointer"
+                >
+                  Next <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

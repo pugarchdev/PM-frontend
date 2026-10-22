@@ -1,6 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { apiFetch } from '../lib/api.ts';
+import { useCalendarEventsQuery, queryKeys } from '../lib/queries.ts';
+import { queryClient } from '../lib/queryClient.ts';
 import { Calendar, Plus, X, Edit2, Trash2, Check, ArrowLeft } from 'lucide-react';
 
 interface CalendarEvent {
@@ -37,9 +39,6 @@ interface CalendarViewProps {
 
 export const CalendarView: React.FC<CalendarViewProps> = ({ onSelectProject, onBack }) => {
   const { currentUser } = useAuth();
-  const [events, setEvents] = useState<CalendarEvent[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<'month' | 'week' | 'day'>('month');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showReminderModal, setShowReminderModal] = useState(false);
@@ -49,49 +48,41 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onSelectProject, onB
     reminderDate: new Date().toISOString().split('T')[0],
   });
 
-  const fetchEvents = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      // Calculate date range based on view
-      const start = new Date(currentDate);
-      const end = new Date(currentDate);
-      
-      if (view === 'month') {
-        start.setDate(1);
-        start.setHours(0, 0, 0, 0);
-        end.setMonth(end.getMonth() + 1);
-        end.setDate(0);
-        end.setHours(23, 59, 59, 999);
-      } else if (view === 'week') {
-        const day = start.getDay();
-        const diff = start.getDate() - day + (day === 0 ? -6 : 1); // Monday start
-        start.setDate(diff);
-        start.setHours(0, 0, 0, 0);
-        end.setDate(start.getDate() + 6);
-        end.setHours(23, 59, 59, 999);
-      } else { // day view
-        start.setHours(0, 0, 0, 0);
-        end.setHours(23, 59, 59, 999);
-      }
-      
-      const res = await apiFetch(`/api/calendar?start=${start.toISOString()}&end=${end.toISOString()}`);
-      if (!res.ok) throw new Error('Failed to load calendar events');
-      const data = await res.json();
-      setEvents(data);
-    } catch (err: any) {
-      setError(err.message || 'Error fetching calendar events');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { startIso, endIso } = useMemo(() => {
+    const start = new Date(currentDate);
+    const end = new Date(currentDate);
 
-  useEffect(() => {
-    if (currentUser) {
-      fetchEvents();
+    if (view === 'month') {
+      start.setDate(1);
+      start.setHours(0, 0, 0, 0);
+      end.setMonth(end.getMonth() + 1);
+      end.setDate(0);
+      end.setHours(23, 59, 59, 999);
+    } else if (view === 'week') {
+      const day = start.getDay();
+      const diff = start.getDate() - day + (day === 0 ? -6 : 1); // Monday start
+      start.setDate(diff);
+      start.setHours(0, 0, 0, 0);
+      end.setDate(start.getDate() + 6);
+      end.setHours(23, 59, 59, 999);
+    } else { // day view
+      start.setHours(0, 0, 0, 0);
+      end.setHours(23, 59, 59, 999);
     }
-  }, [currentUser, view, currentDate]);
+
+    return { startIso: start.toISOString(), endIso: end.toISOString() };
+  }, [currentDate, view]);
+
+  const {
+    data: rawEvents = [],
+    isLoading: loading,
+    error: calendarError,
+    refetch: fetchEvents,
+  } = useCalendarEventsQuery(currentUser?.id, startIso, endIso);
+
+  const events = (rawEvents || []) as CalendarEvent[];
+  const [mutationError, setMutationError] = useState<string | null>(null);
+  const error = mutationError || (calendarError ? (calendarError as Error).message : null);
 
   const handleEventClick = (event: CalendarEvent) => {
     const { extendedProps } = event;
@@ -150,9 +141,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onSelectProject, onB
         description: '',
         reminderDate: new Date().toISOString().split('T')[0],
       });
-      fetchEvents(); // Refresh events
+      queryClient.invalidateQueries({ queryKey: queryKeys.calendarToday(currentUser?.id) });
+      queryClient.invalidateQueries({ queryKey: ['calendar-events', currentUser?.id] });
     } catch (err: any) {
-      setError(err.message || 'Error creating reminder');
+      setMutationError(err.message || 'Error creating reminder');
     } finally {
       submittingReminderRef.current = false;
       setSubmittingReminder(false);
@@ -169,9 +161,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onSelectProject, onB
       
       if (!res.ok) throw new Error('Failed to delete reminder');
       
-      fetchEvents(); // Refresh events
+      queryClient.invalidateQueries({ queryKey: queryKeys.calendarToday(currentUser?.id) });
+      queryClient.invalidateQueries({ queryKey: ['calendar-events', currentUser?.id] });
     } catch (err: any) {
-      setError(err.message || 'Error deleting reminder');
+      setMutationError(err.message || 'Error deleting reminder');
     }
   };
 
@@ -185,9 +178,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onSelectProject, onB
       
       if (!res.ok) throw new Error('Failed to complete reminder');
       
-      fetchEvents(); // Refresh events
+      queryClient.invalidateQueries({ queryKey: queryKeys.calendarToday(currentUser?.id) });
+      queryClient.invalidateQueries({ queryKey: ['calendar-events', currentUser?.id] });
     } catch (err: any) {
-      setError(err.message || 'Error completing reminder');
+      setMutationError(err.message || 'Error completing reminder');
     }
   };
 
@@ -657,7 +651,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onSelectProject, onB
           <div className="p-3.5 rounded-xl bg-[#FEE2E2] border border-[#FECACA] text-[#991B1B] text-xs flex items-center justify-between">
             <span>{error}</span>
             <button
-              onClick={fetchEvents}
+              onClick={() => fetchEvents()}
               className="px-3 py-1 rounded-lg bg-white border border-[#F87171] text-xs font-semibold"
             >
               Retry

@@ -13,6 +13,8 @@ import {
 import { useAuth } from '../context/AuthContext.tsx';
 import { apiFetch } from '../lib/api.ts';
 import { Baseline, BaselineComparison } from '../types.ts';
+import { invalidateProjectQueries } from '../lib/queries.ts';
+import { queryClient } from '../lib/queryClient.ts';
 
 interface ProjectBaselinesTabProps {
   projectId: string;
@@ -81,6 +83,7 @@ export const ProjectBaselinesTab: React.FC<ProjectBaselinesTabProps> = ({ projec
 
       setShowCreateModal(false);
       setBaselineName('');
+      invalidateProjectQueries(queryClient, currentUser?.id, projectId, { baselines: true });
       fetchBaselinesAndComparison();
     } catch (err: any) {
       alert(err.message || 'Error establishing baseline');

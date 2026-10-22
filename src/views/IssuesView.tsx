@@ -1,6 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { apiFetch, apiUrl } from '../lib/api.ts';
+import { useDebounce } from '../lib/useDebounce.ts';
+import {
+  useIssuesQuery,
+  useIssuesSummaryQuery,
+  useProjectsMinimalQuery,
+  queryKeys,
+  invalidateProjectQueries,
+  invalidateIssueQueries,
+} from '../lib/queries.ts';
+import { queryClient } from '../lib/queryClient.ts';
 import { Issue, Project, IssueAttachment } from '../types.ts';
 import { SeverityBadge } from '../components/StatusBadge.tsx';
 import { RaiseIssueModal } from '../components/RaiseIssueModal.tsx';
@@ -30,17 +40,43 @@ interface IssuesViewProps {
 
 export const IssuesView: React.FC<IssuesViewProps> = ({ onSelectProject }) => {
   const { currentUser, isCEO, isProjectOwner } = useAuth();
-  const [issues, setIssues] = useState<Issue[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   // Filters
   const [severityFilter, setSeverityFilter] = useState<string>('ALL');
   const [stateFilter, setStateFilter] = useState<string>('OPEN');
   const [selectedProjectId, setSelectedProjectId] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebounce(searchQuery, 300);
   const [showMobileFilters, setShowMobileFilters] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  const {
+    data: issues = [],
+    isLoading: loading,
+    error: issuesError,
+    refetch: fetchIssues,
+  } = useIssuesQuery(currentUser?.id, {
+    severity: severityFilter,
+    state: stateFilter,
+    projectId: selectedProjectId,
+    search: debouncedSearch,
+  });
+
+  const {
+    data: issueSummary,
+    isLoading: summaryLoading,
+  } = useIssuesSummaryQuery(currentUser?.id, selectedProjectId === 'ALL' ? undefined : selectedProjectId);
+
+  const {
+    data: projects = [],
+  } = useProjectsMinimalQuery(currentUser?.id);
+
+  const error = issuesError ? (issuesError as Error).message : null;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [debouncedSearch, severityFilter, stateFilter, selectedProjectId]);
 
   const activeMobileFilterCount =
     (stateFilter !== 'OPEN' ? 1 : 0) +
@@ -65,42 +101,14 @@ export const IssuesView: React.FC<IssuesViewProps> = ({ onSelectProject }) => {
     setTimeout(() => setToastMessage(null), 5000);
   };
 
-  const fetchData = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const [issuesRes, projectsRes] = await Promise.all([
-        apiFetch('/api/issues'),
-        apiFetch('/api/projects'),
-      ]);
-
-      if (!issuesRes.ok || !projectsRes.ok) {
-        throw new Error('Failed to load issues log');
-      }
-
-      const issuesData = await issuesRes.json();
-      const projectsData = await projectsRes.json();
-
-      setIssues(issuesData);
-      setProjects(projectsData);
-    } catch (err: any) {
-      setError(err.message || 'Error loading issues');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchData();
-  }, [currentUser]);
-
   const handleCloseIssue = async (issueId: string) => {
     try {
+      const targetIssue = issues.find((i) => i.id === issueId);
       const res = await apiFetch(`/api/issues/${issueId}/close`, { method: 'POST' });
       if (!res.ok) throw new Error('Failed to close issue');
       showToast('success', 'Issue closed.');
-      fetchData();
+      invalidateIssueQueries(queryClient, currentUser?.id, targetIssue?.projectId);
+      invalidateProjectQueries(queryClient, currentUser?.id, targetIssue?.projectId, { issues: true });
     } catch (err: any) {
       showToast('error', err.message);
     }
@@ -117,6 +125,7 @@ export const IssuesView: React.FC<IssuesViewProps> = ({ onSelectProject }) => {
     setSubmitting(true);
 
     try {
+      const targetIssue = issues.find((i) => i.id === reopenIssueId);
       const res = await apiFetch(`/api/issues/${reopenIssueId}/reopen`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -129,7 +138,8 @@ export const IssuesView: React.FC<IssuesViewProps> = ({ onSelectProject }) => {
       setShowReopenModal(false);
       setReopenComment('');
       setReopenIssueId(null);
-      fetchData();
+      invalidateIssueQueries(queryClient, currentUser?.id, targetIssue?.projectId);
+      invalidateProjectQueries(queryClient, currentUser?.id, targetIssue?.projectId, { issues: true });
     } catch (err: any) {
       showToast('error', err.message);
     } finally {
@@ -138,19 +148,10 @@ export const IssuesView: React.FC<IssuesViewProps> = ({ onSelectProject }) => {
     }
   };
 
-  const filteredIssues = issues.filter((i) => {
-    const matchesProject = selectedProjectId === 'ALL' || i.projectId === selectedProjectId;
-    const matchesSeverity = severityFilter === 'ALL' || i.severity === severityFilter;
-    const matchesState =
-      stateFilter === 'ALL' ||
-      (stateFilter === 'OPEN' ? i.state !== 'Closed' : i.state === 'Closed');
-    const matchesSearch =
-      i.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      i.detail.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      i.project?.name.toLowerCase().includes(searchQuery.toLowerCase());
-
-    return matchesProject && matchesSeverity && matchesState && matchesSearch;
-  });
+  // If server-side filtered, issues already match; ensure client fallback match if needed
+  const filteredIssues = issues;
+  const totalPages = Math.ceil(filteredIssues.length / pageSize) || 1;
+  const paginatedIssues = filteredIssues.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   return (
     <div className="space-y-5 sm:space-y-6 pb-20 sm:pb-24 max-w-full overflow-hidden sm:overflow-visible">
@@ -197,6 +198,40 @@ export const IssuesView: React.FC<IssuesViewProps> = ({ onSelectProject }) => {
           <span className="sm:hidden">Raise</span>
           <span className="hidden sm:inline">Raise Issue</span>
         </button>
+      </div>
+
+      {/* Decoupled Issue Summary KPI Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="p-3.5 rounded-2xl bg-white border border-[#EAE3D5] shadow-2xs">
+          <div className="text-[11px] font-bold text-[#70675D] uppercase tracking-wider">Total Issues</div>
+          <div className="text-xl sm:text-2xl font-serif font-bold text-[#231E1B] mt-0.5">
+            {summaryLoading ? '...' : issueSummary?.total ?? 0}
+          </div>
+        </div>
+        <div className="p-3.5 rounded-2xl bg-white border border-[#EAE3D5] shadow-2xs">
+          <div className="text-[11px] font-bold text-[#A63C1E] uppercase tracking-wider flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#C85A32]" /> Active / Open
+          </div>
+          <div className="text-xl sm:text-2xl font-serif font-bold text-[#C85A32] mt-0.5">
+            {summaryLoading ? '...' : issueSummary?.openCount ?? 0}
+          </div>
+        </div>
+        <div className="p-3.5 rounded-2xl bg-white border border-[#EAE3D5] shadow-2xs">
+          <div className="text-[11px] font-bold text-[#991B1B] uppercase tracking-wider flex items-center gap-1">
+            <AlertOctagon className="w-3.5 h-3.5 text-[#B3261E]" /> Critical Severity
+          </div>
+          <div className="text-xl sm:text-2xl font-serif font-bold text-[#B3261E] mt-0.5">
+            {summaryLoading ? '...' : issueSummary?.criticalCount ?? 0}
+          </div>
+        </div>
+        <div className="p-3.5 rounded-2xl bg-white border border-[#EAE3D5] shadow-2xs">
+          <div className="text-[11px] font-bold text-[#2D5A34] uppercase tracking-wider flex items-center gap-1">
+            <CheckCircle2 className="w-3.5 h-3.5 text-[#2D5A34]" /> Resolved / Closed
+          </div>
+          <div className="text-xl sm:text-2xl font-serif font-bold text-[#2D5A34] mt-0.5">
+            {summaryLoading ? '...' : issueSummary?.closedCount ?? 0}
+          </div>
+        </div>
       </div>
 
       {/* Filters & Controls */}
@@ -373,6 +408,20 @@ export const IssuesView: React.FC<IssuesViewProps> = ({ onSelectProject }) => {
               </option>
             ))}
           </select>
+
+          {/* Page size dropdown */}
+          <select
+            value={pageSize}
+            onChange={(e) => {
+              setPageSize(Number(e.target.value));
+              setCurrentPage(1);
+            }}
+            className="px-3.5 py-1.5 rounded-full border border-[#DDD6C8] bg-white text-xs font-medium text-[#231E1B] focus:outline-none min-h-[44px] shrink-0 cursor-pointer ml-auto"
+          >
+            <option value={10}>10 / page</option>
+            <option value={20}>20 / page</option>
+            <option value={50}>50 / page</option>
+          </select>
         </div>
       </div>
 
@@ -395,7 +444,7 @@ export const IssuesView: React.FC<IssuesViewProps> = ({ onSelectProject }) => {
       {error && (
         <div className="p-4 rounded-2xl bg-[#FEE2E2] border border-[#FECACA] text-[#991B1B] text-sm flex items-center justify-between">
           <span>{error}</span>
-          <button onClick={fetchData} className="px-3 py-1 bg-white rounded-lg text-xs font-semibold">
+          <button onClick={() => fetchIssues()} className="px-3 py-1 bg-white rounded-lg text-xs font-semibold">
             Retry
           </button>
         </div>
@@ -417,7 +466,7 @@ export const IssuesView: React.FC<IssuesViewProps> = ({ onSelectProject }) => {
       {/* Issues List */}
       {!loading && !error && filteredIssues.length > 0 && (
         <div className="space-y-3">
-          {filteredIssues.map((issue) => {
+          {paginatedIssues.map((issue) => {
             const isClosed = issue.state === 'Closed';
             const canManageIssue =
               isCEO ||
@@ -598,13 +647,39 @@ export const IssuesView: React.FC<IssuesViewProps> = ({ onSelectProject }) => {
         </div>
       )}
 
+      {filteredIssues.length > pageSize && (
+        <div className="flex items-center justify-between pt-4 border-t border-[#EAE3D5] text-xs text-[#70675D]">
+          <div>
+            Page <span className="font-semibold text-[#231E1B]">{currentPage}</span> of{' '}
+            <span className="font-semibold text-[#231E1B]">{totalPages}</span> ({filteredIssues.length} total)
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              disabled={currentPage <= 1}
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              className="px-3.5 py-1.5 rounded-lg border border-[#DDD6C8] bg-white hover:bg-[#FAF8F4] disabled:opacity-40 disabled:cursor-not-allowed font-medium text-[#231E1B] cursor-pointer transition-colors"
+            >
+              Previous
+            </button>
+            <button
+              disabled={currentPage >= totalPages}
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              className="px-3.5 py-1.5 rounded-lg border border-[#DDD6C8] bg-white hover:bg-[#FAF8F4] disabled:opacity-40 disabled:cursor-not-allowed font-medium text-[#231E1B] cursor-pointer transition-colors"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* RAISE ISSUE MODAL */}
       <RaiseIssueModal
         isOpen={showRaiseModal}
         onClose={() => setShowRaiseModal(false)}
         onSuccess={(newIssue) => {
           showToast('success', `Issue "${newIssue.title}" registered successfully.`);
-          fetchData();
+          invalidateIssueQueries(queryClient, currentUser?.id, newIssue.projectId);
+          invalidateProjectQueries(queryClient, currentUser?.id, newIssue.projectId, { issues: true });
         }}
         projects={projects}
         initialProjectId={selectedProjectId !== 'ALL' ? selectedProjectId : undefined}

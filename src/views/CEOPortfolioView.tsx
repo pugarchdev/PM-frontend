@@ -13,43 +13,27 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { apiFetch } from '../lib/api.ts';
+import { useCEOPortfolioQuery } from '../lib/queries.ts';
 import { StatusBadge } from '../components/StatusBadge.tsx';
 import { CEOPortfolioKPIs, CEOPortfolioProject } from '../types.ts';
+import { formatCurrency } from '../lib/currency.ts';
 
 interface CEOPortfolioViewProps {
   onSelectProject: (projectId: string) => void;
 }
 
 export const CEOPortfolioView: React.FC<CEOPortfolioViewProps> = ({ onSelectProject }) => {
-  const { isCEO } = useAuth();
-  const [kpis, setKpis] = useState<CEOPortfolioKPIs | null>(null);
-  const [projects, setProjects] = useState<CEOPortfolioProject[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { currentUser, isCEO } = useAuth();
+  const {
+    data: portfolioData,
+    isLoading: loading,
+    error: portfolioError,
+  } = useCEOPortfolioQuery(currentUser?.id, isCEO);
+
+  const kpis = portfolioData?.kpis || null;
+  const projects = portfolioData?.projects || [];
+  const error = portfolioError ? (portfolioError as Error).message : null;
   const [activeFilter, setActiveFilter] = useState<string>('ALL');
-
-  const fetchPortfolio = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const res = await apiFetch('/api/portfolio/ceo');
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Failed to load CEO portfolio');
-      }
-      const data = await res.json();
-      setKpis(data.kpis);
-      setProjects(data.projects || []);
-    } catch (err: any) {
-      setError(err.message || 'Error loading portfolio data');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchPortfolio();
-  }, []);
 
   const filteredProjects = projects.filter((p) => {
     if (activeFilter === 'ALL') return true;
@@ -114,11 +98,11 @@ export const CEOPortfolioView: React.FC<CEOPortfolioViewProps> = ({ onSelectProj
                 <span className="hidden lg:inline">Committed Portfolio Capital</span>
               </div>
               <div className="text-xl sm:text-2xl font-serif font-bold text-[#231E1B] mt-1">
-                £{kpis.totalPortfolioFunds.toLocaleString()}
+                {formatCurrency(kpis.totalPortfolioFunds)}
               </div>
               <div className="text-[10px] sm:text-[11px] text-[#70685F] mt-1 truncate">
-                <span className="lg:hidden">(£{kpis.totalContingency.toLocaleString()} reserved)</span>
-                <span className="hidden lg:inline">(£{kpis.totalContingency.toLocaleString()} reserved contingency)</span>
+                <span className="lg:hidden">({formatCurrency(kpis.totalContingency)} reserved)</span>
+                <span className="hidden lg:inline">({formatCurrency(kpis.totalContingency)} reserved contingency)</span>
               </div>
             </div>
 
@@ -127,11 +111,11 @@ export const CEOPortfolioView: React.FC<CEOPortfolioViewProps> = ({ onSelectProj
                 Portfolio Spend
               </div>
               <div className="text-xl sm:text-2xl font-serif font-bold text-[#C85A32] mt-1">
-                £{kpis.totalSpend.toLocaleString()}
+                {formatCurrency(kpis.totalSpend)}
               </div>
               <div className="text-[10px] sm:text-[11px] text-[#70685F] mt-1 truncate">
-                <span className="lg:hidden">{kpis.overallSpendPercent}% &bull; £{kpis.portfolioRemaining.toLocaleString()} rem</span>
-                <span className="hidden lg:inline">{kpis.overallSpendPercent}% utilized &bull; £{kpis.portfolioRemaining.toLocaleString()} remaining</span>
+                <span className="lg:hidden">{kpis.overallSpendPercent}% &bull; {formatCurrency(kpis.portfolioRemaining)} rem</span>
+                <span className="hidden lg:inline">{kpis.overallSpendPercent}% utilized &bull; {formatCurrency(kpis.portfolioRemaining)} remaining</span>
               </div>
             </div>
 
@@ -224,7 +208,7 @@ export const CEOPortfolioView: React.FC<CEOPortfolioViewProps> = ({ onSelectProj
                     </div>
                     <span>&bull;</span>
                     <div>
-                      Sponsor: <strong className="text-[#231E1B]">{p.sponsor}</strong>
+                      Client: <strong className="text-[#231E1B]">{p.sponsor}</strong>
                     </div>
                     <ChevronRight className="w-4 h-4 text-[#C85A32]" />
                   </div>
@@ -254,10 +238,10 @@ export const CEOPortfolioView: React.FC<CEOPortfolioViewProps> = ({ onSelectProj
                   <div>
                     <div className="flex justify-between text-[11px] text-[#70685F] mb-1">
                       <span>
-                        Spent: £{p.spendToDate.toLocaleString()} / £{p.plannedBudget.toLocaleString()}
+                        Spent: {formatCurrency(p.spendToDate)} / {formatCurrency(p.plannedBudget)}
                       </span>
                       <span className={p.remainingBudget < 0 ? 'text-[#991B1B] font-bold' : 'text-[#2D5A34]'}>
-                        Rem: £{p.remainingBudget.toLocaleString()}
+                        Rem: {formatCurrency(p.remainingBudget)}
                       </span>
                     </div>
                     <div className="w-full h-2.5 bg-[#F2EDE2] rounded-full overflow-hidden">

@@ -24,6 +24,8 @@ import { SettingsView } from './views/SettingsView.tsx';
 import pugLogo from './assets/pugarch-logo.png';
 import { getSocket } from './lib/socket.ts';
 import { apiFetch } from './lib/api.ts';
+import { useBadgesQuery, useNotificationUnreadCountQuery, queryKeys } from './lib/queries.ts';
+import { queryClient } from './lib/queryClient.ts';
 
 // Map URL pathnames to NavTab values
 const pathToTab: Record<string, NavTab> = {
@@ -185,7 +187,6 @@ function AuthenticatedLayout() {
   const [alertsBadge, setAlertsBadge] = useState<number>(0);
   const [criticalIssuesBadge, setCriticalIssuesBadge] = useState<number>(0);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
-  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState<number>(0);
   const mainScrollRef = useRef<HTMLElement>(null);
 
   const scrollToTop = () => {
@@ -200,54 +201,35 @@ function AuthenticatedLayout() {
     ? 'projects'
     : pathToTab[currentPath] ?? 'alerts';
 
-  // Fetch unread notifications count
-  const fetchNotificationCount = async () => {
-    if (!currentUser) return;
-    try {
-      const res = await apiFetch('/api/notifications');
-      if (res.ok) {
-        const data = await res.json();
-        setUnreadNotificationsCount(data.unreadCount || 0);
-      }
-    } catch {
-      // silent fallback
-    }
-  };
-
-  useEffect(() => {
-    fetchNotificationCount();
-    const interval = setInterval(fetchNotificationCount, 10000);
-    return () => clearInterval(interval);
-  }, [currentUser]);
+  // Lightweight unread notification count for top brand bar
+  const { data: unreadCountData } = useNotificationUnreadCountQuery(currentUser?.id);
+  const unreadNotificationsCount = unreadCountData?.unreadCount ?? 0;
 
   // Real-time notification updates
   useEffect(() => {
     if (!currentUser) return;
     const socket = getSocket(currentUser.id);
-    const handleNewNotification = () => setUnreadNotificationsCount((prev) => prev + 1);
+    const handleNewNotification = () => {
+      queryClient.invalidateQueries({ queryKey: ['notification-unread-count', currentUser.id] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.notifications(currentUser.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.badges(currentUser.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.alerts(currentUser.id) });
+    };
     socket.on('notification:new', handleNewNotification);
     return () => {
       socket.off('notification:new', handleNewNotification);
     };
   }, [currentUser]);
 
-  // Poll badges
+  // TanStack Query for badge counts (uses lightweight /api/alerts/badges endpoint)
+  const { data: badgesData } = useBadgesQuery(currentUser?.id);
+
   useEffect(() => {
-    if (!currentUser) return;
-    const fetchBadges = async () => {
-      try {
-        const res = await apiFetch('/api/alerts');
-        if (res.ok) {
-          const data = await res.json();
-          setAlertsBadge(data.alerts?.length || 0);
-          setCriticalIssuesBadge(data.summary?.criticalIssuesCount || 0);
-        }
-      } catch {
-        // silent badge fallback
-      }
-    };
-    fetchBadges();
-  }, [currentUser, location.pathname]);
+    if (badgesData) {
+      setAlertsBadge(badgesData.alertsBadge || 0);
+      setCriticalIssuesBadge(badgesData.criticalIssuesBadge || 0);
+    }
+  }, [badgesData]);
 
   const handleTabChange = (tab: NavTab) => {
     navigate(tabToPath[tab]);
@@ -390,10 +372,7 @@ function AuthenticatedLayout() {
       {/* Real-time Notifications Drawer */}
       <NotificationsModal
         isOpen={isNotificationsOpen}
-        onClose={() => {
-          setIsNotificationsOpen(false);
-          fetchNotificationCount();
-        }}
+        onClose={() => setIsNotificationsOpen(false)}
         onSelectProject={handleSelectProject}
       />
     </div>

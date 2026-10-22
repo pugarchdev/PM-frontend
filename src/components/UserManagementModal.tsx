@@ -16,6 +16,8 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '../lib/api.ts';
 import { useAuth } from '../context/AuthContext.tsx';
+import { useUsersManagementQuery, useRolesQuery, invalidateUserQueries } from '../lib/queries.ts';
+import { queryClient } from '../lib/queryClient.ts';
 
 interface ManagedUser {
   id: string;
@@ -49,14 +51,19 @@ interface UserManagementModalProps {
 }
 
 export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen, onClose }) => {
-  const { preRegisterUser } = useAuth();
+  const { currentUser, preRegisterUser } = useAuth();
   const [activeTab, setActiveTab] = useState<'list' | 'create'>('list');
-  const [users, setUsers] = useState<ManagedUser[]>([]);
-  const [roles, setRoles] = useState<RoleOption[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'completed'>('all');
+
+  const { data: usersData = [], isLoading: usersLoading, error: usersErr } = useUsersManagementQuery(currentUser?.id);
+  const { data: rolesData = [], isLoading: rolesLoading } = useRolesQuery(currentUser?.id);
+
+  const users = usersData as ManagedUser[];
+  const roles = rolesData as RoleOption[];
+  const loading = usersLoading || rolesLoading;
+  const [mutationError, setMutationError] = useState<string | null>(null);
+  const error = mutationError || (usersErr ? (usersErr as Error).message : null);
 
   // Form state
   const [formName, setFormName] = useState('');
@@ -69,37 +76,19 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const fetchUsers = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const res = await apiFetch('/api/users/management');
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Failed to load user directory');
-      }
-      const data = await res.json();
-      setUsers(data);
-
-      const rolesRes = await apiFetch('/api/roles');
-      if (rolesRes.ok) {
-        const rolesData = await rolesRes.json();
-        setRoles(rolesData);
-        if (rolesData.length > 0 && !formRoleId) {
-          const defaultRole = rolesData.find((r: any) => r.name === 'Employee') || rolesData[rolesData.length - 1];
-          setFormRoleId(defaultRole.id);
-        }
-      }
-    } catch (err: any) {
-      setError(err.message || 'Failed to fetch users');
-    } finally {
-      setLoading(false);
+  useEffect(() => {
+    if (roles.length > 0 && !formRoleId) {
+      const defaultRole = roles.find((r: any) => r.name === 'Employee') || roles[roles.length - 1];
+      setFormRoleId(defaultRole.id);
     }
+  }, [roles, formRoleId]);
+
+  const fetchUsers = async () => {
+    invalidateUserQueries(queryClient, currentUser?.id);
   };
 
   useEffect(() => {
     if (isOpen) {
-      fetchUsers();
       setFormSuccess(null);
       setFormError(null);
     }
