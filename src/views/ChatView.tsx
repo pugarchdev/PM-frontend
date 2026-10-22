@@ -1,21 +1,41 @@
 import React, { useState, useEffect } from 'react';
-import { MessageSquare, FolderKanban, ChevronRight, Hash, Users } from 'lucide-react';
+import { MessageSquare, FolderKanban, ChevronRight, Hash } from 'lucide-react';
 import { ProjectChatTab } from '../components/ProjectChatTab.tsx';
-import { StatusBadge } from '../components/StatusBadge.tsx';
 import { Project } from '../types.ts';
 import { useAuth } from '../context/AuthContext.tsx';
 import { useProjectsQuery } from '../lib/queries.ts';
+import { apiFetch } from '../lib/api.ts';
 
 export const ChatView: React.FC = () => {
   const { currentUser } = useAuth();
   const { data: projects = [], isLoading: loading } = useProjectsQuery(currentUser?.id);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [unreadMap, setUnreadMap] = useState<Record<string, number>>({});
 
   useEffect(() => {
     if (projects.length > 0 && !selectedProject) {
       setSelectedProject(projects[0]);
     }
   }, [projects, selectedProject]);
+
+  // Fetch unread count map across all accessible projects
+  const fetchUnreadCounts = async () => {
+    try {
+      const res = await apiFetch('/api/chat/unread-counts');
+      if (res.ok) {
+        const data = await res.json();
+        setUnreadMap(data.unreadCounts || {});
+      }
+    } catch {
+      // silent background sync
+    }
+  };
+
+  useEffect(() => {
+    fetchUnreadCounts();
+    const interval = setInterval(fetchUnreadCounts, 4000);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <div className="space-y-6 pb-24">
@@ -32,7 +52,7 @@ export const ChatView: React.FC = () => {
             </span>
           </div>
           <p className="text-xs lg:text-sm text-[#70685F] mt-0.5 break-words">
-            Dedicated project channels, typing indicators, and @mentions
+            Project-wise group discussions and private one-to-one direct messages
           </p>
         </div>
       </div>
@@ -57,6 +77,7 @@ export const ChatView: React.FC = () => {
             <div className="flex flex-row overflow-x-auto no-scrollbar gap-2 pb-1 lg:flex-col lg:overflow-visible lg:gap-1.5">
               {projects.map((proj) => {
                 const isSelected = selectedProject?.id === proj.id;
+                const unread = unreadMap[proj.id] || 0;
                 return (
                   <button
                     key={proj.id}
@@ -79,7 +100,14 @@ export const ChatView: React.FC = () => {
                       </div>
                     </div>
 
-                    <ChevronRight className={`w-4 h-4 shrink-0 hidden lg:block ${isSelected ? 'text-[#C85A32]' : 'text-[#C0B9AF]'}`} />
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {unread > 0 && (
+                        <span className="px-1.5 py-0.2 text-[10px] font-bold bg-[#C85A32] text-white rounded-full">
+                          {unread}
+                        </span>
+                      )}
+                      <ChevronRight className={`w-4 h-4 shrink-0 hidden lg:block ${isSelected ? 'text-[#C85A32]' : 'text-[#C0B9AF]'}`} />
+                    </div>
                   </button>
                 );
               })}
@@ -90,6 +118,7 @@ export const ChatView: React.FC = () => {
           <div className="lg:col-span-8">
             {selectedProject ? (
               <ProjectChatTab
+                key={selectedProject.id}
                 projectId={selectedProject.id}
                 projectName={selectedProject.name}
               />

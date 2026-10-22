@@ -232,6 +232,8 @@ export interface AlertItem {
 export interface ChatMessage {
   id: string;
   projectId: string;
+  conversationId?: string;
+  conversationType?: 'GROUP' | 'DIRECT';
   authorId: string;
   body: string;
   mentions: string;
@@ -239,10 +241,39 @@ export interface ChatMessage {
   author: {
     id: string;
     name: string;
-    role: Role;
+    role: Role | string;
     avatarUrl: string | null;
     department: string | null;
   };
+}
+
+export interface ChatConversationMeta {
+  id: string;
+  projectId: string;
+  type: 'GROUP' | 'DIRECT';
+  memberCount?: number;
+  unreadCount: number;
+  lastMessage?: {
+    id: string;
+    body: string;
+    sentAt: string;
+    author: { id: string; name: string };
+  } | null;
+  otherUser?: {
+    id: string;
+    name: string;
+    role: string;
+    avatarUrl: string | null;
+    department?: string | null;
+  } | null;
+  updatedAt: string;
+}
+
+export interface ProjectChatOverview {
+  project: { id: string; name: string };
+  groupConversation: ChatConversationMeta;
+  directConversations: ChatConversationMeta[];
+  members: User[];
 }
 
 export interface ApprovalRequest {
