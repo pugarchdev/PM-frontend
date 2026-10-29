@@ -53,7 +53,14 @@ const fmt = (date: string) =>
   new Date(date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 
 export const WorkloadView: React.FC = () => {
-  const { currentUser, isCEO, isProjectOwner } = useAuth();
+  const { currentUser, isCEO, isCTO, isProjectOwner } = useAuth();
+  const isLeadership =
+    isCEO ||
+    isCTO ||
+    currentUser?.role === 'CEO' ||
+    currentUser?.role === 'CTO' ||
+    (currentUser?.roleRank !== undefined && currentUser.roleRank <= 2) ||
+    (currentUser?.roleDefinition?.rank !== undefined && currentUser.roleDefinition.rank <= 2);
 
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState('');
@@ -91,10 +98,21 @@ export const WorkloadView: React.FC = () => {
   } = useProjectsMinimalQuery(currentUser?.id);
 
   const {
-    data: myLeave = [],
+    data: allLeave = [],
     isLoading: leaveLoading,
     refetch: fetchMyLeave,
-  } = useLeaveRequestsQuery(currentUser?.id, 'mine');
+  } = useLeaveRequestsQuery(currentUser?.id, isLeadership ? undefined : 'mine');
+
+  const [leaveTab, setLeaveTab] = useState<'current' | 'past'>('current');
+
+  const isPastLeave = (leave: LeaveRequest) => {
+    const end = new Date(leave.endDate);
+    end.setHours(23, 59, 59, 999);
+    return end.getTime() < Date.now();
+  };
+
+  const currentLeaves = allLeave.filter((l) => !isPastLeave(l));
+  const pastLeaves = allLeave.filter((l) => isPastLeave(l));
 
   const error = workloadError ? (workloadError as Error).message : null;
 
@@ -180,7 +198,7 @@ export const WorkloadView: React.FC = () => {
 
       setShowLeaveModal(false);
       setLeaveForm({ startDate: '', endDate: '', dayType: 'Full day', leaveType: 'Annual Leave', reason: '' });
-      setToast('Leave request submitted successfully');
+      setToast(isCEO ? 'Leave recorded successfully' : 'Leave request submitted successfully');
       setTimeout(() => setToast(null), 4000);
       invalidateLeaveQueries(queryClient, currentUser?.id);
       queryClient.invalidateQueries({ queryKey: queryKeys.alerts(currentUser?.id) });
@@ -234,16 +252,16 @@ export const WorkloadView: React.FC = () => {
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          {/* Request Leave button */}
+          {/* Leave button */}
           <button
             id="btn-request-leave"
             onClick={() => setShowLeaveModal(true)}
             className="px-3.5 py-2 rounded-full bg-[#C85A32] hover:bg-[#AD4722] text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer min-h-[36px] sm:min-h-[44px]"
-            title="Request Leave"
+            title={isCEO ? 'I am on leave' : 'Request Leave'}
           >
             <Plane className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Request Leave</span>
-            <span className="sm:hidden">Leave</span>
+            <span className="hidden sm:inline">{isCEO ? 'I am on leave' : 'Request Leave'}</span>
+            <span className="sm:hidden">{isCEO ? 'On Leave' : 'Leave'}</span>
           </button>
           {/* Pre-Register User button — CEO only */}
           {isCEO && (
@@ -266,52 +284,143 @@ export const WorkloadView: React.FC = () => {
         </div>
       </div>
 
-      {/* MY LEAVE — visible to all users */}
+      {/* LEAVE RECORDS SECTION — visible to all users with Current & Past tabs */}
       <div className="bg-white border border-[#EAE3D5] rounded-2xl shadow-xs overflow-hidden">
-          <button
-            onClick={() => setShowMyLeave(!showMyLeave)}
-            className="w-full flex items-center justify-between px-4 sm:px-5 py-3.5 cursor-pointer hover:bg-[#FAF8F4] transition-colors"
-          >
-            <div className="flex items-center gap-2">
-              <Plane className="w-4 h-4 text-[#C85A32]" />
-              <span className="font-serif font-bold text-sm text-[#231E1B]">My Leave Requests</span>
-              {myLeave.filter((l) => l.status === 'Pending').length > 0 && (
-                <span className="text-[10px] font-bold bg-[#C85A32] text-white px-2 py-0.5 rounded-full">
-                  {myLeave.filter((l) => l.status === 'Pending').length} pending
-                </span>
-              )}
-            </div>
-            <ChevronDown
-              className={`w-4 h-4 text-[#70685F] transition-transform duration-200 ${showMyLeave ? 'rotate-180' : ''}`}
-            />
-          </button>
+        <button
+          onClick={() => setShowMyLeave(!showMyLeave)}
+          className="w-full flex items-center justify-between px-4 sm:px-5 py-3.5 cursor-pointer hover:bg-[#FAF8F4] transition-colors"
+        >
+          <div className="flex items-center gap-2 flex-wrap">
+            <Plane className="w-4 h-4 text-[#C85A32]" />
+            <span className="font-serif font-bold text-sm text-[#231E1B]">
+              {isLeadership ? 'Organization Leave Records' : 'My Leave Records'}
+            </span>
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#FAF6EE] border border-[#EAE3D5] text-[#70685F]">
+              {isLeadership ? 'All Company Roles' : 'Personal Scope'}
+            </span>
+            {currentLeaves.filter((l) => l.status === 'Pending').length > 0 && (
+              <span className="text-[10px] font-bold bg-[#C85A32] text-white px-2 py-0.5 rounded-full">
+                {currentLeaves.filter((l) => l.status === 'Pending').length} pending
+              </span>
+            )}
+          </div>
+          <ChevronDown
+            className={`w-4 h-4 text-[#70685F] transition-transform duration-200 ${showMyLeave ? 'rotate-180' : ''}`}
+          />
+        </button>
 
-          {showMyLeave && (
-            <div className="border-t border-[#EAE3D5] px-4 sm:px-5 py-4 space-y-3">
-              {leaveLoading ? (
-                <div className="space-y-2">
-                  {[1, 2].map((i) => (
-                    <div key={i} className="h-14 bg-[#FAF7F2] rounded-xl animate-pulse" />
-                  ))}
-                </div>
-              ) : myLeave.length === 0 ? (
-                <div className="py-6 text-center space-y-1">
-                  <Plane className="w-8 h-8 text-[#DDD6C8] mx-auto" />
-                  <p className="text-xs text-[#70685F]">No leave requests submitted yet.</p>
+        {showMyLeave && (
+          <div className="border-t border-[#EAE3D5] px-4 sm:px-5 py-4 space-y-3.5">
+            {/* Sub-tabs: Current Leave / Past Leave */}
+            <div className="flex items-center gap-2 border-b border-[#EAE3D5] pb-3">
+              <button
+                type="button"
+                onClick={() => setLeaveTab('current')}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  leaveTab === 'current'
+                    ? 'bg-[#C85A32] text-white shadow-xs'
+                    : 'bg-[#FAF6EE] text-[#70685F] hover:text-[#231E1B] border border-[#EAE3D5]'
+                }`}
+              >
+                <span>Current Leave</span>
+                <span
+                  className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                    leaveTab === 'current' ? 'bg-white/20 text-white' : 'bg-[#EAE3D5] text-[#5A524A]'
+                  }`}
+                >
+                  {currentLeaves.length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setLeaveTab('past')}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  leaveTab === 'past'
+                    ? 'bg-[#C85A32] text-white shadow-xs'
+                    : 'bg-[#FAF6EE] text-[#70685F] hover:text-[#231E1B] border border-[#EAE3D5]'
+                }`}
+              >
+                <span>Past Leave</span>
+                <span
+                  className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                    leaveTab === 'past' ? 'bg-white/20 text-white' : 'bg-[#EAE3D5] text-[#5A524A]'
+                  }`}
+                >
+                  {pastLeaves.length}
+                </span>
+              </button>
+            </div>
+
+            {leaveLoading ? (
+              <div className="space-y-2">
+                {[1, 2].map((i) => (
+                  <div key={i} className="h-14 bg-[#FAF7F2] rounded-xl animate-pulse" />
+                ))}
+              </div>
+            ) : (leaveTab === 'current' ? currentLeaves : pastLeaves).length === 0 ? (
+              <div className="py-6 text-center space-y-1">
+                <Plane className="w-8 h-8 text-[#DDD6C8] mx-auto" />
+                <p className="text-xs text-[#70685F]">
+                  {leaveTab === 'current'
+                    ? 'No current or upcoming leave requests.'
+                    : 'No past leave records found.'}
+                </p>
+                {leaveTab === 'current' && (
                   <button
                     onClick={() => setShowLeaveModal(true)}
                     className="mt-2 px-4 py-2 rounded-full bg-[#C85A32] text-white text-xs font-semibold hover:bg-[#AD4722] active:scale-95 transition-all cursor-pointer"
                   >
-                    Request Leave
+                    {isCEO ? 'I am on leave' : 'Request Leave'}
                   </button>
-                </div>
-              ) : (
-                <div className="space-y-2.5">
-                  {myLeave.map((leave) => (
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {(leaveTab === 'current' ? currentLeaves : pastLeaves).map((leave) => {
+                  const isOwn = leave.requestedBy === currentUser?.id;
+                  return (
                     <div
                       key={leave.id}
-                      className="p-3.5 rounded-xl bg-[#FAF8F4] border border-[#EDE7DC] space-y-2"
+                      className="p-3.5 rounded-xl bg-[#FAF8F4] border border-[#EDE7DC] space-y-2.5"
                     >
+                      {/* Requester info for leadership or colleagues */}
+                      {leave.requester && (isLeadership || !isOwn) && (
+                        <div className="flex items-center gap-2 pb-2 border-b border-[#EAE3D5]/70">
+                          <img
+                            src={
+                              leave.requester.avatarUrl ||
+                              `https://api.dicebear.com/7.x/initials/svg?seed=${leave.requester.name || 'User'}`
+                            }
+                            alt={leave.requester.name}
+                            className="w-6 h-6 rounded-full border border-white shadow-2xs shrink-0"
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                            <span className="text-xs font-bold text-[#231E1B] truncate">
+                              {leave.requester.name}
+                              {isOwn ? ' (You)' : ''}
+                            </span>
+                            <span
+                              className={`text-[9px] font-semibold px-2 py-0.2 rounded-full border ${
+                                leave.requester.role === 'Intern'
+                                  ? 'bg-[#F3E8FF] text-[#6B21A8] border-[#E9D5FF]'
+                                  : leave.requester.role === 'CTO' || leave.requester.role === 'CEO'
+                                  ? 'bg-[#EFF6FF] text-[#1E40AF] border-[#BFDBFE]'
+                                  : 'bg-[#ECFDF5] text-[#065F46] border-[#A7F3D0]'
+                              }`}
+                            >
+                              {leave.requester.roleDefinition?.name || leave.requester.role}
+                            </span>
+                            {leave.requester.department && (
+                              <span className="text-[10px] text-[#70685F]">
+                                • {leave.requester.department}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
                       <div className="flex items-start justify-between gap-2">
                         <div className="space-y-0.5 min-w-0">
                           <div className="flex items-center gap-1.5 flex-wrap">
@@ -335,6 +444,22 @@ export const WorkloadView: React.FC = () => {
                         </span>
                       </div>
 
+                      {/* Approved Note & Reviewer */}
+                      {leave.status === 'Approved' && (leave.reviewNote || leave.reviewer?.name) && (
+                        <div className="text-[11px] bg-[#EBF2EB] border border-[#C6DEC7] rounded-lg px-3 py-2 text-[#2D5A34] space-y-0.5">
+                          {leave.reviewNote && (
+                            <div>
+                              <strong>Note:</strong> {leave.reviewNote}
+                            </div>
+                          )}
+                          {leave.reviewer?.name && (
+                            <div className="text-[10px] text-[#4A724E]">
+                              Decided by {leave.reviewer.name} ({leave.reviewer.role})
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       {/* Sent back note */}
                       {leave.status === 'Sent back' && leave.reviewNote && (
                         <div className="text-[11px] bg-[#FFF8E6] border border-[#FDE68A] rounded-lg px-3 py-2 text-[#92400E]">
@@ -342,39 +467,48 @@ export const WorkloadView: React.FC = () => {
                         </div>
                       )}
 
-                      {/* Declined note */}
-                      {leave.status === 'Declined' && leave.reviewNote && (
-                        <div className="text-[11px] bg-[#FEE2E2] border border-[#FECACA] rounded-lg px-3 py-2 text-[#991B1B]">
-                          <strong>Reason:</strong> {leave.reviewNote}
+                      {/* Declined note & Reviewer */}
+                      {leave.status === 'Declined' && (
+                        <div className="text-[11px] bg-[#FEE2E2] border border-[#FECACA] rounded-lg px-3 py-2 text-[#991B1B] space-y-0.5">
+                          <div>
+                            <strong>Reason:</strong> {leave.reviewNote || 'Request declined.'}
+                          </div>
+                          {leave.reviewer?.name && (
+                            <div className="text-[10px] text-[#991B1B]">
+                              Decided by {leave.reviewer.name} ({leave.reviewer.role})
+                            </div>
+                          )}
                         </div>
                       )}
 
-                      {/* Withdraw button for Pending requests */}
-                      {leave.status === 'Pending' && (
+                      {/* Withdraw / Cancel button: Pending requests for all, or active leave for CEO */}
+                      {isOwn && (leave.status === 'Pending' || (isCEO && leaveTab === 'current')) && (
                         <div className="pt-1">
                           <button
                             onClick={() => handleWithdraw(leave.id)}
                             className="text-[11px] font-semibold text-[#8C3A27] hover:text-[#C85A32] flex items-center gap-1 cursor-pointer"
                           >
                             <X className="w-3 h-3" />
-                            Withdraw
+                            {isCEO && leave.status === 'Approved' ? 'Cancel Leave' : 'Withdraw'}
                           </button>
                         </div>
                       )}
                     </div>
-                  ))}
-                  <button
-                    onClick={() => setShowLeaveModal(true)}
-                    className="w-full py-2.5 rounded-xl border border-dashed border-[#C85A32]/40 text-xs font-semibold text-[#C85A32] hover:bg-[#FDF2ED] active:scale-[0.99] transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    New Leave Request
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+                  );
+                })}
+
+                <button
+                  onClick={() => setShowLeaveModal(true)}
+                  className="w-full py-2.5 rounded-xl border border-dashed border-[#C85A32]/40 text-xs font-semibold text-[#C85A32] hover:bg-[#FDF2ED] active:scale-[0.99] transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  {isCEO ? 'I am on leave' : 'New Leave Request'}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Summary KPI cards (Independent loading state) */}
       {(() => {
@@ -903,10 +1037,12 @@ export const WorkloadView: React.FC = () => {
               <div>
                 <h4 className="font-serif text-lg font-bold text-[#231E1B] flex items-center gap-2">
                   <Plane className="w-5 h-5 text-[#C85A32]" />
-                  Request Leave
+                  {isCEO ? 'I am on leave' : 'Request Leave'}
                 </h4>
                 <p className="text-xs text-[#70685F] mt-0.5">
-                  {designatedApprover
+                  {isCEO
+                    ? 'Record your planned leave. As CEO, this will be automatically confirmed without requiring approval.'
+                    : designatedApprover
                     ? `Designated Approver: ${designatedApprover.name} (${designatedApprover.role})`
                     : 'Submit leave request through the organizational reporting hierarchy.'}
                 </p>
@@ -919,7 +1055,7 @@ export const WorkloadView: React.FC = () => {
               </button>
             </div>
 
-            {designatedApprover && (
+            {!isCEO && designatedApprover && (
               <div className="bg-[#FAF8F4] border border-[#EDE7DC] rounded-xl p-2.5 text-xs text-[#70685F] flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-[#2D5A34] shrink-0" />
                 <span>
@@ -999,7 +1135,7 @@ export const WorkloadView: React.FC = () => {
                   rows={2}
                   value={leaveForm.reason}
                   onChange={(e) => setLeaveForm((f) => ({ ...f, reason: e.target.value }))}
-                  placeholder="Brief reason for your leave request..."
+                  placeholder={isCEO ? "Note or reason for leave..." : "Brief reason for your leave request..."}
                   className="w-full bg-[#FAF7F2] border border-[#DDD6C8] rounded-xl px-3.5 py-2.5 text-sm text-[#231E1B] focus:ring-1 focus:ring-[#C85A32] resize-none"
                 />
               </div>
@@ -1017,7 +1153,7 @@ export const WorkloadView: React.FC = () => {
                   disabled={leaveSubmitting}
                   className="w-full sm:w-auto px-5 py-2.5 rounded-full text-xs font-semibold bg-[#C85A32] text-white hover:bg-[#AD4722] min-h-[44px] shadow-xs cursor-pointer active:scale-95 disabled:opacity-60"
                 >
-                  {leaveSubmitting ? 'Submitting...' : 'Submit Leave Request'}
+                  {leaveSubmitting ? 'Saving...' : isCEO ? 'I am on leave' : 'Submit Leave Request'}
                 </button>
               </div>
             </form>

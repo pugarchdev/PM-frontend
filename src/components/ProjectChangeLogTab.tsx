@@ -12,12 +12,38 @@ interface ProjectChangeLogTabProps {
 export const ProjectChangeLogTab: React.FC<ProjectChangeLogTabProps> = ({ projectId, projectName }) => {
   const { currentUser } = useAuth();
   const {
-    data: entries = [],
+    data,
     isLoading: loading,
     error: changelogErr,
   } = useProjectChangeLogQuery(projectId, currentUser?.id);
   const error = changelogErr ? (changelogErr as Error).message : null;
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
+
+  const entries: ChangeLogItem[] = React.useMemo(() => {
+    if (!data) return [];
+    if (Array.isArray(data)) return data;
+    if (Array.isArray((data as any).changeLogs)) {
+      const logs = (data as any).changeLogs || [];
+      const statusOverrides = ((data as any).statusOverrides || []).map((s: any) => ({
+        id: s.id,
+        projectId: s.projectId,
+        what: 'Status Override',
+        fromValue: s.fromStatus,
+        toValue: s.toStatus,
+        actorId: s.user?.name || s.overriddenBy,
+        at: s.createdAt,
+        sourceType: 'STATUS',
+        sourceId: s.id,
+        action: 'STATUS_OVERRIDE',
+        details: s.reason,
+        changedBy: s.user?.name || s.overriddenBy,
+      }));
+      return [...logs, ...statusOverrides].sort(
+        (a, b) => new Date(b.at || (b as any).createdAt).getTime() - new Date(a.at || (a as any).createdAt).getTime()
+      );
+    }
+    return [];
+  }, [data]);
 
   const filteredEntries = entries.filter((item) => {
     if (categoryFilter === 'ALL') return true;

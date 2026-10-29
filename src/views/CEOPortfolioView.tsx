@@ -46,23 +46,24 @@ export const CEOPortfolioView: React.FC<CEOPortfolioViewProps> = ({ onSelectProj
   });
 
   return (
-    <div className="space-y-5 sm:space-y-6 pb-20 sm:pb-24 max-w-full overflow-hidden sm:overflow-visible">
-      {/* Header Banner */}
-      <div className="p-4 sm:p-6 rounded-2xl lg:rounded-3xl bg-[#231E1B] text-white space-y-2.5 sm:space-y-3 shadow-sm">
-        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-          <span className="text-[9px] sm:text-[10px] uppercase font-bold tracking-widest px-2.5 py-0.5 rounded-full bg-white/10 text-white/80">
-            Executive Command
-          </span>
-          <span className="text-[9px] sm:text-[10px] uppercase font-bold tracking-widest px-2 py-0.5 rounded-full bg-[#C85A32] text-white">
-            CEO Dashboard
-          </span>
-        </div>
-
-        <div>
-          <h2 className="font-serif text-xl sm:text-2xl lg:text-3xl font-bold tracking-tight">
-            Portfolio Health &amp; Capital Allocation
-          </h2>
-          <p className="text-xs lg:text-sm text-white/70 max-w-xl mt-1 leading-relaxed">
+    <div className="space-y-3.5 sm:space-y-4 pb-20 sm:pb-24 max-w-full overflow-hidden sm:overflow-visible">
+      {/* Header Banner - Compact & Simplified */}
+      <div className="py-2.5 px-3.5 sm:py-3 sm:px-5 rounded-xl sm:rounded-2xl bg-[#231E1B] text-white shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 sm:gap-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="font-serif text-base sm:text-lg font-bold tracking-tight">
+              Portfolio Health &amp; Capital Allocation
+            </h2>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[9px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-white/10 text-white/80">
+                Executive Command
+              </span>
+              <span className="text-[9px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-[#C85A32] text-white">
+                CEO Dashboard
+              </span>
+            </div>
+          </div>
+          <p className="text-[11px] sm:text-xs text-white/70 mt-0.5 max-w-2xl leading-normal">
             Consolidated oversight across active initiatives, financial burn rates, schedule variance, and critical risk escalations.
           </p>
         </div>

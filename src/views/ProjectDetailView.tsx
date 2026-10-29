@@ -50,6 +50,23 @@ interface ProjectDetailViewProps {
   onBack: () => void;
 }
 
+const getTodayDateString = () => {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getTomorrowDateString = () => {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   projectId,
   initialTab = 'phases',
@@ -189,8 +206,8 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskAssigneeId, setNewTaskAssigneeId] = useState('');
   const [newTaskPriority, setNewTaskPriority] = useState<'Low' | 'Normal' | 'High'>('Normal');
-  const [newTaskPlannedStart, setNewTaskPlannedStart] = useState('');
-  const [newTaskPlannedEnd, setNewTaskPlannedEnd] = useState('');
+  const [newTaskPlannedStart, setNewTaskPlannedStart] = useState(getTodayDateString);
+  const [newTaskPlannedEnd, setNewTaskPlannedEnd] = useState(getTomorrowDateString);
   const [newTaskPlannedHours, setNewTaskPlannedHours] = useState(8);
 
   const [showNewIssueModal, setShowNewIssueModal] = useState(false);
@@ -214,7 +231,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   const [expandedTasks, setExpandedTasks] = useState<Record<string, boolean>>({});
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
-  const [assignableUsers, setAssignableUsers] = useState<Array<{ id: string; name: string; role: string }>>([]);
+  const [assignableUsers, setAssignableUsers] = useState<Array<{ id: string; name: string; role: string; isOnLeave?: boolean }>>([]);
 
   const showToast = (type: 'error' | 'success', text: string) => {
     setToastMessage({ type, text });
@@ -252,8 +269,6 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
       setError(null);
       setNewPhaseStart((prev) => prev || detailData.startDate.slice(0, 10));
       setNewPhaseEnd((prev) => prev || detailData.endDate.slice(0, 10));
-      setNewTaskPlannedStart((prev) => prev || detailData.startDate.slice(0, 10));
-      setNewTaskPlannedEnd((prev) => prev || detailData.endDate.slice(0, 10));
       setNewMilestoneBaseline((prev) => prev || detailData.startDate.slice(0, 10));
       setNewMilestoneForecast((prev) => prev || detailData.startDate.slice(0, 10));
     } else if (detailError) {
@@ -322,10 +337,10 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
         statusOverride: overrideStatus,
         metrics: prev.metrics
           ? {
-              ...prev.metrics,
-              status: overrideStatus as any,
-              isOverridden: true,
-            }
+            ...prev.metrics,
+            status: overrideStatus as any,
+            isOverridden: true,
+          }
           : prev.metrics,
       };
     });
@@ -372,9 +387,9 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
         statusOverride: null,
         metrics: prev.metrics
           ? {
-              ...prev.metrics,
-              isOverridden: false,
-            }
+            ...prev.metrics,
+            isOverridden: false,
+          }
           : prev.metrics,
       };
     });
@@ -507,6 +522,13 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
       showToast('error', 'Task title is required');
       return;
     }
+    if (newTaskAssigneeId) {
+      const assigned = assignableUsers.find((u) => u.id === newTaskAssigneeId);
+      if (assigned?.isOnLeave) {
+        showToast('error', `Cannot assign task to ${assigned.name}: User is currently on approved leave.`);
+        return;
+      }
+    }
     if (submittingRef.current || submitting) return;
     submittingRef.current = true;
     setSubmitting(true);
@@ -552,11 +574,11 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
           phases: updatedPhases,
           metrics: prev.metrics
             ? {
-                ...prev.metrics,
-                progress,
-                completedTasks,
-                totalTasks,
-              }
+              ...prev.metrics,
+              progress,
+              completedTasks,
+              totalTasks,
+            }
             : prev.metrics,
         };
       });
@@ -565,6 +587,8 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
       setShowNewTaskModal(false);
       setNewTaskTitle('');
       setNewTaskAssigneeId('');
+      setNewTaskPlannedStart(getTodayDateString());
+      setNewTaskPlannedEnd(getTomorrowDateString());
       fetchProject(false, { tasks: true });
     } catch (err: any) {
       showToast('error', err.message);
@@ -601,11 +625,11 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
         phases: updatedPhases,
         metrics: prev.metrics
           ? {
-              ...prev.metrics,
-              progress,
-              completedTasks,
-              totalTasks,
-            }
+            ...prev.metrics,
+            progress,
+            completedTasks,
+            totalTasks,
+          }
           : prev.metrics,
       };
     });
@@ -659,11 +683,11 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
           phases: updatedPhases,
           metrics: prev.metrics
             ? {
-                ...prev.metrics,
-                progress,
-                completedTasks,
-                totalTasks,
-              }
+              ...prev.metrics,
+              progress,
+              completedTasks,
+              totalTasks,
+            }
             : prev.metrics,
         };
       });
@@ -1009,11 +1033,10 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
       {/* Toast Notification */}
       {toastMessage && (
         <div
-          className={`fixed top-16 right-4 z-50 p-4 rounded-xl shadow-lg border max-w-md animate-in slide-in-from-top-2 text-xs flex items-center justify-between gap-3 ${
-            toastMessage.type === 'error'
+          className={`fixed top-16 right-4 z-50 p-4 rounded-xl shadow-lg border max-w-md animate-in slide-in-from-top-2 text-xs flex items-center justify-between gap-3 ${toastMessage.type === 'error'
               ? 'bg-[#FEE2E2] text-[#991B1B] border-[#FECACA]'
               : 'bg-[#EBF2EB] text-[#2D5A34] border-[#C4D9C5]'
-          }`}
+            }`}
         >
           <div className="flex items-center gap-2">
             {toastMessage.type === 'error' ? (
@@ -1095,13 +1118,12 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
             />
             {/* Actual progress bar */}
             <div
-              className={`relative h-full rounded-full transition-all duration-500 ${
-                metrics.status === 'OFF_TRACK'
+              className={`relative h-full rounded-full transition-all duration-500 ${metrics.status === 'OFF_TRACK'
                   ? 'bg-[#B3261E]'
                   : metrics.status === 'AT_RISK'
-                  ? 'bg-[#D97706]'
-                  : 'bg-[#526E55]'
-              }`}
+                    ? 'bg-[#D97706]'
+                    : 'bg-[#526E55]'
+                }`}
               style={{ width: `${Math.min(100, Math.max(0, metrics.progress))}%` }}
             />
           </div>
@@ -1170,20 +1192,18 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
             key={tab.key}
             id={`tab-btn-${tab.key}`}
             onClick={() => setActiveTab(tab.key as any)}
-            className={`px-3 sm:px-4 py-2 sm:py-2.5 text-xs font-semibold whitespace-nowrap transition-all border-b-2 min-h-[38px] sm:min-h-[44px] cursor-pointer flex items-center gap-1.5 shrink-0 ${
-              activeTab === tab.key
+            className={`px-3 sm:px-4 py-2 sm:py-2.5 text-xs font-semibold whitespace-nowrap transition-all border-b-2 min-h-[38px] sm:min-h-[44px] cursor-pointer flex items-center gap-1.5 shrink-0 ${activeTab === tab.key
                 ? 'border-[#C85A32] text-[#C85A32]'
                 : 'border-transparent text-[#70685F] hover:text-[#231E1B]'
-            }`}
+              }`}
           >
             <span>{tab.label}</span>
             {tab.count !== undefined && (
               <span
-                className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                  activeTab === tab.key
+                className={`text-[10px] px-1.5 py-0.2 rounded-full ${activeTab === tab.key
                     ? 'bg-[#C85A32] text-white'
                     : 'bg-[#EAE4D8] text-[#60564C]'
-                }`}
+                  }`}
               >
                 {tab.count}
               </span>
@@ -1261,6 +1281,12 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                           id={`add-task-btn-${phase.id}`}
                           onClick={() => {
                             setSelectedPhaseId(phase.id);
+                            setNewTaskTitle('');
+                            setNewTaskAssigneeId('');
+                            setNewTaskPriority('Normal');
+                            setNewTaskPlannedHours(8);
+                            setNewTaskPlannedStart(getTodayDateString());
+                            setNewTaskPlannedEnd(getTomorrowDateString());
                             setShowNewTaskModal(true);
                             setAssignableUsers(usersList as any);
                           }}
@@ -1344,13 +1370,12 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                                     <strong className="text-[#231E1B]">{task.assignee?.name || 'Unassigned'}</strong>
                                     {task.assignee && (
                                       <span
-                                        className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                                          (task.assignee.roleDefinition?.rank === 4 || task.assignee.role === 'Intern')
+                                        className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${(task.assignee.roleDefinition?.rank === 4 || task.assignee.role === 'Intern')
                                             ? 'bg-[#F3E8FF] text-[#6B21A8] border border-[#E9D5FF]'
                                             : (task.assignee.roleDefinition?.rank === 2 || task.assignee.role === 'CTO')
-                                            ? 'bg-[#EFF6FF] text-[#1E40AF] border border-[#BFDBFE]'
-                                            : 'bg-[#ECFDF5] text-[#065F46] border border-[#A7F3D0]'
-                                        }`}
+                                              ? 'bg-[#EFF6FF] text-[#1E40AF] border border-[#BFDBFE]'
+                                              : 'bg-[#ECFDF5] text-[#065F46] border border-[#A7F3D0]'
+                                          }`}
                                       >
                                         {task.assignee.roleDefinition?.name || task.assignee.role}
                                       </span>
@@ -1391,11 +1416,10 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
 
                                     <button
                                       onClick={() => handleToggleRiskFlag(task)}
-                                      className={`p-2 rounded-xl border min-h-[36px] min-w-[36px] sm:min-h-[44px] sm:min-w-[44px] flex items-center justify-center cursor-pointer shrink-0 ${
-                                        task.hasRiskFlag
+                                      className={`p-2 rounded-xl border min-h-[36px] min-w-[36px] sm:min-h-[44px] sm:min-w-[44px] flex items-center justify-center cursor-pointer shrink-0 ${task.hasRiskFlag
                                           ? 'bg-[#FEE2E2] border-[#FECACA] text-[#B3261E]'
                                           : 'bg-white border-[#E0D9CC] text-[#7A7165] hover:text-[#B3261E]'
-                                      }`}
+                                        }`}
                                       title="Flag / unflag execution risk"
                                     >
                                       <Flag className="w-4 h-4" />
@@ -1597,13 +1621,12 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                         <div className="text-xs font-bold text-[#231E1B] truncate">{member.name}</div>
                         <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
                           <span
-                            className={`text-[9px] font-semibold px-2 py-0.5 rounded-full border ${
-                              member.isIntern
+                            className={`text-[9px] font-semibold px-2 py-0.5 rounded-full border ${member.isIntern
                                 ? 'bg-[#F3E8FF] text-[#6B21A8] border-[#E9D5FF]'
                                 : member.roleName === 'CTO' || member.roleName === 'CEO'
-                                ? 'bg-[#EFF6FF] text-[#1E40AF] border-[#BFDBFE]'
-                                : 'bg-[#ECFDF5] text-[#065F46] border-[#A7F3D0]'
-                            }`}
+                                  ? 'bg-[#EFF6FF] text-[#1E40AF] border-[#BFDBFE]'
+                                  : 'bg-[#ECFDF5] text-[#065F46] border-[#A7F3D0]'
+                              }`}
                           >
                             {member.roleName}
                           </span>
@@ -1721,9 +1744,8 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                       <div className="flex items-center gap-2">
                         <SeverityBadge severity={issue.severity} />
                         <span
-                          className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                            isClosed ? 'bg-gray-100 text-gray-600' : 'bg-[#FBECE6] text-[#C85A32]'
-                          }`}
+                          className={`text-xs font-medium px-2 py-0.5 rounded-full ${isClosed ? 'bg-gray-100 text-gray-600' : 'bg-[#FBECE6] text-[#C85A32]'
+                            }`}
                         >
                           {issue.state}
                         </span>
@@ -1796,11 +1818,10 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                         )}
                       </div>
                       <p
-                        className={`font-mono text-[12px] text-[#443E38] whitespace-pre-wrap leading-relaxed ${
-                          !expandedSteps[issue.id] && issue.stepsToReproduce.length > 180
+                        className={`font-mono text-[12px] text-[#443E38] whitespace-pre-wrap leading-relaxed ${!expandedSteps[issue.id] && issue.stepsToReproduce.length > 180
                             ? 'line-clamp-3'
                             : ''
-                        }`}
+                          }`}
                       >
                         {issue.stepsToReproduce}
                       </p>
@@ -2035,11 +2056,11 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
 
       {/* MODAL: STATUS OVERRIDE */}
       {showOverrideModal && (
-        <div 
+        <div
           className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200"
           onClick={() => setShowOverrideModal(false)}
         >
-          <div 
+          <div
             className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl border-t sm:border border-[#EAE3D5] space-y-4 max-h-[92vh] sm:max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
@@ -2125,11 +2146,11 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
 
       {/* MODAL: NEW PHASE */}
       {showNewPhaseModal && (
-        <div 
+        <div
           className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200"
           onClick={() => setShowNewPhaseModal(false)}
         >
-          <div 
+          <div
             className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl border-t sm:border border-[#EAE3D5] space-y-4 max-h-[92vh] sm:max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
@@ -2203,11 +2224,11 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
 
       {/* MODAL: NEW TASK */}
       {showNewTaskModal && (
-        <div 
+        <div
           className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200"
           onClick={() => setShowNewTaskModal(false)}
         >
-          <div 
+          <div
             className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl border-t sm:border border-[#EAE3D5] space-y-4 max-h-[92vh] sm:max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
@@ -2247,11 +2268,14 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                     className="w-full p-2.5 rounded-xl border border-[#DDD6C8] text-sm min-h-[44px]"
                   >
                     <option value="">Unassigned</option>
-                    {assignableUsers.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name} ({u.role})
-                      </option>
-                    ))}
+                    {assignableUsers.map((u) => {
+                      const onLeave = !!u.isOnLeave;
+                      return (
+                        <option key={u.id} value={u.id} disabled={onLeave}>
+                          {u.name} ({u.role}){onLeave ? ' — On Leave' : ''}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
                 <div>
@@ -2345,11 +2369,11 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
 
       {/* MODAL: REOPEN ISSUE */}
       {showReopenModal && (
-        <div 
+        <div
           className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200"
           onClick={() => setShowReopenModal(false)}
         >
-          <div 
+          <div
             className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl border-t sm:border border-[#EAE3D5] space-y-4 max-h-[92vh] sm:max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
@@ -2403,11 +2427,11 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
 
       {/* MODAL: NEW RISK */}
       {showNewRiskModal && (
-        <div 
+        <div
           className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200"
           onClick={() => setShowNewRiskModal(false)}
         >
-          <div 
+          <div
             className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl border-t sm:border border-[#EAE3D5] space-y-4 max-h-[92vh] sm:max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
@@ -2483,11 +2507,11 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
 
       {/* MODAL: NEW MILESTONE */}
       {showNewMilestoneModal && (
-        <div 
+        <div
           className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200"
           onClick={() => setShowNewMilestoneModal(false)}
         >
-          <div 
+          <div
             className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 shadow-2xl border-t sm:border border-[#EAE3D5] space-y-4 max-h-[92vh] sm:max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200"
             onClick={(e) => e.stopPropagation()}
           >

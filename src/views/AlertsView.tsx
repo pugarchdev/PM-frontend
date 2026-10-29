@@ -146,17 +146,27 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onSelectProject, onShowC
     !isExecutiveDashboard &&
     ((data?.dashboardScope?.roleRank ?? 99) <= 2 || (data?.dashboardScope?.isManager ?? false) || (currentUser?.roleRank !== undefined && currentUser.roleRank <= 2));
 
+  // Filter out leaves whose dates have passed from the dashboard
+  const isLeavePassed = (leave: LeaveRequest) => {
+    if (leave.status === 'Pending') return false; // Pending review stays visible until decided
+    const end = new Date(leave.endDate);
+    end.setHours(23, 59, 59, 999);
+    return end.getTime() < Date.now();
+  };
+
+  const activeDashboardLeaves = leaveRequests.filter((leave) => !isLeavePassed(leave));
+
   // Determine if this user has authority to review leaves (executives or managers with subordinate requests)
   const canReviewLeaves =
     isExecutiveDashboard ||
     isManagerDashboard ||
     (data?.dashboardScope?.isManager ?? false) ||
-    leaveRequests.some((l) => l.requestedBy !== currentUser?.id);
+    activeDashboardLeaves.some((l) => l.requestedBy !== currentUser?.id);
 
   // Subordinate requests available for review (strictly excluding own requests)
-  const reviewableLeaves = leaveRequests.filter((l) => l.requestedBy !== currentUser?.id);
+  const reviewableLeaves = activeDashboardLeaves.filter((l) => l.requestedBy !== currentUser?.id);
   const pendingApprovals = reviewableLeaves.filter((l) => l.status === 'Pending');
-  const pendingLeave = leaveRequests.filter((l) => l.status === 'Pending');
+  const pendingLeave = activeDashboardLeaves.filter((l) => l.status === 'Pending');
 
   return (
     <div className="space-y-5 sm:space-y-6 pb-20 sm:pb-24 max-w-full overflow-hidden sm:overflow-visible">
@@ -219,74 +229,113 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onSelectProject, onShowC
       </div>
 
       {/* Summary KPI Strip */}
-      {data?.summary && (
+      {loading && !data ? (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3.5">
-          <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-[#EAE3D5] shadow-xs flex flex-col justify-between">
-            <div className="flex items-center justify-between gap-1">
-              <span className="text-[10px] sm:text-xs font-bold text-[#8C2B2B] uppercase tracking-wider truncate">
-                Critical Issues
-              </span>
-              <AlertOctagon className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#B3261E] shrink-0" />
+          {[1, 2, 3, 4].map((i) => (
+            <div
+              key={i}
+              className="p-3.5 sm:p-4 rounded-2xl bg-white border border-[#EAE3D5] shadow-xs flex flex-col justify-between h-24 animate-pulse space-y-2"
+            >
+              <div className="flex items-center justify-between gap-1">
+                <div className="h-3 w-20 bg-[#EAE3D5] rounded-md" />
+                <div className="w-3.5 h-3.5 bg-[#EAE3D5] rounded-full" />
+              </div>
+              <div className="h-6 w-10 bg-[#EAE3D5] rounded-md my-1" />
+              <div className="h-2.5 w-16 bg-[#EAE3D5] rounded-md" />
             </div>
-            <div className="mt-1 sm:mt-2 text-xl sm:text-2xl font-bold font-serif text-[#231E1B]">
-              {data.summary.criticalIssuesCount}
-            </div>
-            <span className="text-[10px] sm:text-[11px] text-[#70675D] mt-0.5 truncate">Affects status</span>
-          </div>
-
-          <div className="p-3 sm:p-3.5 rounded-2xl bg-white border border-[#EAE3D5] shadow-xs flex flex-col justify-between">
-            <div className="flex items-center justify-between gap-1">
-              <span className="text-[10px] sm:text-xs font-bold text-[#B45309] uppercase tracking-wider truncate">
-                High Risks
-              </span>
-              <AlertTriangle className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#D97706] shrink-0" />
-            </div>
-            <div className="mt-1 sm:mt-2 text-xl sm:text-2xl font-bold font-serif text-[#231E1B]">
-              {data.summary.highRisksCount}
-            </div>
-            <span className="text-[10px] sm:text-[11px] text-[#70675D] mt-0.5 truncate">Leadership view</span>
-          </div>
-
-          <div className="p-3 sm:p-3.5 rounded-2xl bg-white border border-[#EAE3D5] shadow-xs flex flex-col justify-between">
-            <div className="flex items-center justify-between gap-1">
-              <span className="text-[10px] sm:text-xs font-bold text-[#6B7280] uppercase tracking-wider truncate">
-                Blocked Tasks
-              </span>
-              <ShieldAlert className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#6B7280] shrink-0" />
-            </div>
-            <div className="mt-1 sm:mt-2 text-xl sm:text-2xl font-bold font-serif text-[#231E1B]">
-              {data.summary.blockedTasksCount}
-            </div>
-            <span className="text-[10px] sm:text-[11px] text-[#70675D] mt-0.5 truncate">Work stoppage</span>
-          </div>
-
-          <div className="p-3 sm:p-3.5 rounded-2xl bg-white border border-[#EAE3D5] shadow-xs flex flex-col justify-between">
-            <div className="flex items-center justify-between gap-1">
-              <span className="text-[10px] sm:text-xs font-bold text-[#2D5A34] uppercase tracking-wider truncate">
-                {isExecutiveDashboard ? 'Org Projects' : isManagerDashboard ? 'Team Tasks' : 'Active Tasks'}
-              </span>
-              <CheckSquare className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#407B4A] shrink-0" />
-            </div>
-            <div className="mt-1 sm:mt-2 text-xl sm:text-2xl font-bold font-serif text-[#231E1B]">
-              {isExecutiveDashboard
-                ? data.summary.totalProjectsCount
-                : isManagerDashboard
-                ? (data.taskDistribution?.total ?? data.summary.myTasksCount)
-                : data.summary.myTasksCount}
-            </div>
-            <span className="text-[10px] sm:text-[11px] text-[#70675D] mt-0.5 truncate">
-              {isExecutiveDashboard
-                ? `${data.summary.onTrackCount} on track`
-                : isManagerDashboard
-                ? 'Authorized team scope'
-                : 'Assigned to you'}
-            </span>
-          </div>
+          ))}
         </div>
+      ) : (
+        data?.summary && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3.5">
+            <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-[#EAE3D5] shadow-xs flex flex-col justify-between">
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] sm:text-xs font-bold text-[#8C2B2B] uppercase tracking-wider truncate">
+                  Critical Issues
+                </span>
+                <AlertOctagon className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#B3261E] shrink-0" />
+              </div>
+              <div className="mt-1 sm:mt-2 text-xl sm:text-2xl font-bold font-serif text-[#231E1B]">
+                {data.summary.criticalIssuesCount}
+              </div>
+              <span className="text-[10px] sm:text-[11px] text-[#70675D] mt-0.5 truncate">Affects status</span>
+            </div>
+
+            <div className="p-3 sm:p-3.5 rounded-2xl bg-white border border-[#EAE3D5] shadow-xs flex flex-col justify-between">
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] sm:text-xs font-bold text-[#B45309] uppercase tracking-wider truncate">
+                  High Risks
+                </span>
+                <AlertTriangle className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#D97706] shrink-0" />
+              </div>
+              <div className="mt-1 sm:mt-2 text-xl sm:text-2xl font-bold font-serif text-[#231E1B]">
+                {data.summary.highRisksCount}
+              </div>
+              <span className="text-[10px] sm:text-[11px] text-[#70675D] mt-0.5 truncate">Leadership view</span>
+            </div>
+
+            <div className="p-3 sm:p-3.5 rounded-2xl bg-white border border-[#EAE3D5] shadow-xs flex flex-col justify-between">
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] sm:text-xs font-bold text-[#6B7280] uppercase tracking-wider truncate">
+                  Blocked Tasks
+                </span>
+                <ShieldAlert className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#6B7280] shrink-0" />
+              </div>
+              <div className="mt-1 sm:mt-2 text-xl sm:text-2xl font-bold font-serif text-[#231E1B]">
+                {data.summary.blockedTasksCount}
+              </div>
+              <span className="text-[10px] sm:text-[11px] text-[#70675D] mt-0.5 truncate">Work stoppage</span>
+            </div>
+
+            <div className="p-3 sm:p-3.5 rounded-2xl bg-white border border-[#EAE3D5] shadow-xs flex flex-col justify-between">
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] sm:text-xs font-bold text-[#2D5A34] uppercase tracking-wider truncate">
+                  {isExecutiveDashboard ? 'Org Projects' : isManagerDashboard ? 'Team Tasks' : 'Active Tasks'}
+                </span>
+                <CheckSquare className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#407B4A] shrink-0" />
+              </div>
+              <div className="mt-1 sm:mt-2 text-xl sm:text-2xl font-bold font-serif text-[#231E1B]">
+                {isExecutiveDashboard
+                  ? data.summary.totalProjectsCount
+                  : isManagerDashboard
+                  ? (data.taskDistribution?.total ?? data.summary.myTasksCount)
+                  : data.summary.myTasksCount}
+              </div>
+              <span className="text-[10px] sm:text-[11px] text-[#70675D] mt-0.5 truncate">
+                {isExecutiveDashboard
+                  ? `${data.summary.onTrackCount} on track`
+                  : isManagerDashboard
+                  ? 'Authorized team scope'
+                  : 'Assigned to you'}
+              </span>
+            </div>
+          </div>
+        )
       )}
 
       {/* Dynamic Task Distribution by Status */}
-      {data?.taskDistribution && data.taskDistribution.total > 0 && (
+      {loading && !data ? (
+        <div className="p-4 sm:p-5 rounded-2xl bg-white border border-[#E8E2D5] shadow-2xs space-y-3.5 animate-pulse">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded bg-[#EAE3D5]" />
+              <div className="h-4 w-56 bg-[#EAE3D5] rounded-md" />
+            </div>
+            <div className="h-3.5 w-20 bg-[#EAE3D5] rounded-full" />
+          </div>
+          <div className="h-3 w-full bg-[#FAF7F2] rounded-full border border-[#EAE3D5] overflow-hidden">
+            <div className="h-full w-2/5 bg-[#EAE3D5]/70 rounded-full" />
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#EAE3D5] shrink-0" />
+                <div className="h-3 w-16 bg-[#EAE3D5] rounded" />
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
         <div className="p-4 sm:p-5 rounded-2xl bg-white border border-[#E8E2D5] shadow-2xs space-y-3">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2">
@@ -363,119 +412,205 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onSelectProject, onShowC
       )}
 
       {/* Workload Section: Team Distribution (CEO & CTO) vs Personal Workload (Employee/Intern) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
-        {/* If team distribution is provided (CEO & CTO) */}
-        {data?.workloadMetrics?.teamDistribution && (
-          <div className="p-4 sm:p-5 rounded-2xl bg-white border border-[#E8E2D5] shadow-2xs space-y-3 flex flex-col justify-between">
+      {/* Workload Section: Team Distribution (CEO & CTO) vs Personal Workload (Employee/Intern) */}
+      {loading && !data ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+          <div className="p-4 sm:p-5 rounded-2xl bg-white border border-[#E8E2D5] shadow-2xs space-y-3 flex flex-col justify-between animate-pulse">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Users className="w-4 h-4 text-[#C85A32]" />
-                <h3 className="font-serif text-sm sm:text-base font-bold text-[#231E1B]">
-                  {isExecutiveDashboard
-                    ? 'Organization Workload Distribution'
-                    : 'Team Workload Distribution (Subordinates)'}
-                </h3>
+                <div className="w-4 h-4 bg-[#EAE3D5] rounded" />
+                <div className="h-4 w-44 bg-[#EAE3D5] rounded-md" />
               </div>
-              <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-[#FAF6EE] text-[#70675D] border border-[#EAE3D5]">
-                {data.workloadMetrics.teamDistribution.totalTeam} Active Members
-              </span>
+              <div className="h-4 w-28 bg-[#EAE3D5] rounded-full" />
             </div>
-
-            <div className="grid grid-cols-3 gap-2">
-              <div className="p-2.5 rounded-xl bg-[#FEF2F2] border border-[#FECACA] text-center">
-                <div className="text-[10px] font-bold text-[#991B1B] uppercase">Overallocated</div>
-                <div className="text-lg font-bold text-[#991B1B] font-serif">
-                  {data.workloadMetrics.teamDistribution.overallocatedCount}
+            <div className="grid grid-cols-3 gap-2 py-1">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="p-2.5 rounded-xl bg-[#FAF7F2] border border-[#EAE3D5] space-y-1.5 text-center">
+                  <div className="h-2 w-16 bg-[#EAE3D5] rounded mx-auto" />
+                  <div className="h-5 w-8 bg-[#EAE3D5] rounded mx-auto" />
+                  <div className="h-2 w-12 bg-[#EAE3D5] rounded mx-auto" />
                 </div>
-                <div className="text-[9px] text-[#991B1B]">&gt; 100% capacity</div>
-              </div>
-
-              <div className="p-2.5 rounded-xl bg-[#FFFBEB] border border-[#FDE68A] text-center">
-                <div className="text-[10px] font-bold text-[#92400E] uppercase">Balanced</div>
-                <div className="text-lg font-bold text-[#92400E] font-serif">
-                  {data.workloadMetrics.teamDistribution.balancedCount}
-                </div>
-                <div className="text-[9px] text-[#92400E]">70% - 100%</div>
-              </div>
-
-              <div className="p-2.5 rounded-xl bg-[#F0FDF4] border border-[#BBF7D0] text-center">
-                <div className="text-[10px] font-bold text-[#166534] uppercase">Available</div>
-                <div className="text-lg font-bold text-[#166534] font-serif">
-                  {data.workloadMetrics.teamDistribution.availableCount}
-                </div>
-                <div className="text-[9px] text-[#166534]">&lt; 70% capacity</div>
-              </div>
+              ))}
             </div>
-
-            <div className="text-[11px] text-[#70675D] flex items-center justify-between pt-1 border-t border-[#F5F1E8]">
-              <span>Standard 37h/week reference</span>
-              <a href="/workload" className="text-[#C85A32] font-semibold hover:underline flex items-center gap-0.5">
-                View Workload Details <ChevronRight className="w-3.5 h-3.5" />
-              </a>
+            <div className="flex items-center justify-between pt-1 border-t border-[#F5F1E8]">
+              <div className="h-2.5 w-36 bg-[#EAE3D5] rounded" />
+              <div className="h-2.5 w-24 bg-[#EAE3D5] rounded" />
             </div>
           </div>
-        )}
 
-        {/* Personal Workload Card (Available to all users; for Employee/Intern this is their primary capacity card) */}
-        {data?.workloadMetrics?.myWorkload && (
-          <div className="p-4 sm:p-5 rounded-2xl bg-white border border-[#E8E2D5] shadow-2xs space-y-3 flex flex-col justify-between">
+          <div className="p-4 sm:p-5 rounded-2xl bg-white border border-[#E8E2D5] shadow-2xs space-y-3 flex flex-col justify-between animate-pulse">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Activity className="w-4 h-4 text-[#C85A32]" />
-                <h3 className="font-serif text-sm sm:text-base font-bold text-[#231E1B]">
-                  Your Capacity Utilization
-                </h3>
+                <div className="w-4 h-4 bg-[#EAE3D5] rounded" />
+                <div className="h-4 w-40 bg-[#EAE3D5] rounded-md" />
               </div>
-              <span
-                className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
-                  data.workloadMetrics.myWorkload.status === 'OVER'
-                    ? 'bg-[#FEF2F2] text-[#991B1B] border-[#FECACA]'
-                    : data.workloadMetrics.myWorkload.status === 'BALANCED'
-                    ? 'bg-[#FFFBEB] text-[#92400E] border-[#FDE68A]'
-                    : 'bg-[#F0FDF4] text-[#166534] border-[#BBF7D0]'
-                }`}
-              >
-                {data.workloadMetrics.myWorkload.statusLabel}
-              </span>
+              <div className="h-4 w-16 bg-[#EAE3D5] rounded-full" />
             </div>
-
-            <div className="space-y-1.5">
-              <div className="flex items-baseline justify-between text-xs">
-                <span className="text-[#70675D]">Allocated:</span>
-                <span className="font-bold text-sm text-[#231E1B]">
-                  {data.workloadMetrics.myWorkload.allocatedHours} hrs / 37 hrs
+            <div className="space-y-1.5 py-1">
+              <div className="flex justify-between">
+                <div className="h-3 w-16 bg-[#EAE3D5] rounded" />
+                <div className="h-3 w-24 bg-[#EAE3D5] rounded" />
+              </div>
+              <div className="h-2.5 w-full bg-[#FAF7F2] rounded-full border border-[#EAE3D5]" />
+              <div className="h-2.5 w-12 bg-[#EAE3D5] rounded ml-auto" />
+            </div>
+            <div className="pt-1 border-t border-[#F5F1E8]">
+              <div className="h-2.5 w-4/5 bg-[#EAE3D5] rounded" />
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+          {/* If team distribution is provided (CEO & CTO) */}
+          {data?.workloadMetrics?.teamDistribution && (
+            <div className="p-4 sm:p-5 rounded-2xl bg-white border border-[#E8E2D5] shadow-2xs space-y-3 flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Users className="w-4 h-4 text-[#C85A32]" />
+                  <h3 className="font-serif text-sm sm:text-base font-bold text-[#231E1B]">
+                    {isExecutiveDashboard
+                      ? 'Organization Workload Distribution'
+                      : 'Team Workload Distribution (Subordinates)'}
+                  </h3>
+                </div>
+                <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-[#FAF6EE] text-[#70675D] border border-[#EAE3D5]">
+                  {data.workloadMetrics.teamDistribution.totalTeam} Active Members
                 </span>
               </div>
-              <div className="h-2.5 w-full bg-[#FAF7F2] rounded-full overflow-hidden border border-[#EAE3D5]">
-                <div
-                  style={{ width: `${Math.min(data.workloadMetrics.myWorkload.percentage, 100)}%` }}
-                  className={`h-full transition-all ${
-                    data.workloadMetrics.myWorkload.status === 'OVER'
-                      ? 'bg-[#DC2626]'
-                      : data.workloadMetrics.myWorkload.status === 'BALANCED'
-                      ? 'bg-[#D97706]'
-                      : 'bg-[#16A34A]'
-                  }`}
-                />
-              </div>
-              <div className="text-[11px] text-[#70675D] text-right">
-                {data.workloadMetrics.myWorkload.percentage}% load
-              </div>
-            </div>
 
-            <div className="text-[11px] text-[#70675D] pt-1 border-t border-[#F5F1E8]">
-              {data.workloadMetrics.myWorkload.status === 'OVER'
-                ? 'Your assigned commitments exceed regular full-time weekly capacity.'
-                : data.workloadMetrics.myWorkload.status === 'BALANCED'
-                ? 'Healthy workload allocation within normal 37h weekly bounds.'
-                : 'Available bandwidth for additional assignments or project support.'}
+              <div className="grid grid-cols-3 gap-2">
+                <div className="p-2.5 rounded-xl bg-[#FEF2F2] border border-[#FECACA] text-center">
+                  <div className="text-[10px] font-bold text-[#991B1B] uppercase">Overallocated</div>
+                  <div className="text-lg font-bold text-[#991B1B] font-serif">
+                    {data.workloadMetrics.teamDistribution.overallocatedCount}
+                  </div>
+                  <div className="text-[9px] text-[#991B1B]">&gt; 100% capacity</div>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-[#FFFBEB] border border-[#FDE68A] text-center">
+                  <div className="text-[10px] font-bold text-[#92400E] uppercase">Balanced</div>
+                  <div className="text-lg font-bold text-[#92400E] font-serif">
+                    {data.workloadMetrics.teamDistribution.balancedCount}
+                  </div>
+                  <div className="text-[9px] text-[#92400E]">70% - 100%</div>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-[#F0FDF4] border border-[#BBF7D0] text-center">
+                  <div className="text-[10px] font-bold text-[#166534] uppercase">Available</div>
+                  <div className="text-lg font-bold text-[#166534] font-serif">
+                    {data.workloadMetrics.teamDistribution.availableCount}
+                  </div>
+                  <div className="text-[9px] text-[#166534]">&lt; 70% capacity</div>
+                </div>
+              </div>
+
+              <div className="text-[11px] text-[#70675D] flex items-center justify-between pt-1 border-t border-[#F5F1E8]">
+                <span>Standard 37h/week reference</span>
+                <a href="/workload" className="text-[#C85A32] font-semibold hover:underline flex items-center gap-0.5">
+                  View Workload Details <ChevronRight className="w-3.5 h-3.5" />
+                </a>
+              </div>
             </div>
-          </div>
-        )}
-      </div>
+          )}
+
+          {/* Personal Workload Card (Available to all users; for Employee/Intern this is their primary capacity card) */}
+          {data?.workloadMetrics?.myWorkload && (
+            <div className="p-4 sm:p-5 rounded-2xl bg-white border border-[#E8E2D5] shadow-2xs space-y-3 flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-[#C85A32]" />
+                  <h3 className="font-serif text-sm sm:text-base font-bold text-[#231E1B]">
+                    Your Capacity Utilization
+                  </h3>
+                </div>
+                <span
+                  className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
+                    data.workloadMetrics.myWorkload.status === 'OVER'
+                      ? 'bg-[#FEF2F2] text-[#991B1B] border-[#FECACA]'
+                      : data.workloadMetrics.myWorkload.status === 'BALANCED'
+                      ? 'bg-[#FFFBEB] text-[#92400E] border-[#FDE68A]'
+                      : 'bg-[#F0FDF4] text-[#166534] border-[#BBF7D0]'
+                  }`}
+                >
+                  {data.workloadMetrics.myWorkload.statusLabel}
+                </span>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex items-baseline justify-between text-xs">
+                  <span className="text-[#70675D]">Allocated:</span>
+                  <span className="font-bold text-sm text-[#231E1B]">
+                    {data.workloadMetrics.myWorkload.allocatedHours} hrs / 37 hrs
+                  </span>
+                </div>
+                <div className="h-2.5 w-full bg-[#FAF7F2] rounded-full overflow-hidden border border-[#EAE3D5]">
+                  <div
+                    style={{ width: `${Math.min(data.workloadMetrics.myWorkload.percentage, 100)}%` }}
+                    className={`h-full transition-all ${
+                      data.workloadMetrics.myWorkload.status === 'OVER'
+                        ? 'bg-[#DC2626]'
+                        : data.workloadMetrics.myWorkload.status === 'BALANCED'
+                        ? 'bg-[#D97706]'
+                        : 'bg-[#16A34A]'
+                    }`}
+                  />
+                </div>
+                <div className="text-[11px] text-[#70675D] text-right">
+                  {data.workloadMetrics.myWorkload.percentage}% load
+                </div>
+              </div>
+
+              <div className="text-[11px] text-[#70675D] pt-1 border-t border-[#F5F1E8]">
+                {data.workloadMetrics.myWorkload.status === 'OVER'
+                  ? 'Your assigned commitments exceed regular full-time weekly capacity.'
+                  : data.workloadMetrics.myWorkload.status === 'BALANCED'
+                  ? 'Healthy workload allocation within normal 37h weekly bounds.'
+                  : 'Available bandwidth for additional assignments or project support.'}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Authorized Projects & Progress Showcase */}
-      {data?.dashboardProjects && data.dashboardProjects.length > 0 && (
+      {loading && !data ? (
+        <div className="space-y-3.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Briefcase className="w-4 h-4 sm:w-5 sm:h-5 text-[#C85A32]" />
+              <div className="h-5 w-56 bg-[#EAE3D5] rounded-md animate-pulse" />
+            </div>
+            <div className="h-3 w-28 bg-[#EAE3D5] rounded animate-pulse" />
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5 sm:gap-4">
+            <div className="p-4 sm:p-5 rounded-2xl bg-white border border-[#E8E2D5] shadow-xs space-y-3 flex flex-col justify-between animate-pulse">
+              <div className="space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="space-y-1.5 flex-1">
+                    <div className="flex items-center gap-2">
+                      <div className="h-5 w-24 bg-[#EAE3D5] rounded" />
+                      <div className="h-4 w-16 bg-[#EAE3D5] rounded-full" />
+                    </div>
+                    <div className="h-3 w-3/4 bg-[#EAE3D5] rounded" />
+                  </div>
+                </div>
+                <div className="space-y-1 pt-1">
+                  <div className="flex justify-between">
+                    <div className="h-2.5 w-16 bg-[#EAE3D5] rounded" />
+                    <div className="h-2.5 w-16 bg-[#EAE3D5] rounded" />
+                  </div>
+                  <div className="h-2 w-full bg-[#FAF7F2] rounded-full border border-[#EAE3D5]" />
+                </div>
+              </div>
+              <div className="flex items-center justify-between pt-2 border-t border-[#F5F1E8]">
+                <div className="h-3 w-28 bg-[#EAE3D5] rounded" />
+                <div className="h-3 w-32 bg-[#EAE3D5] rounded" />
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
         <div className="space-y-3.5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -792,14 +927,14 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onSelectProject, onShowC
                     <div key={i} className="h-14 bg-[#FAF7F2] rounded-xl animate-pulse" />
                   ))}
                 </div>
-              ) : leaveRequests.length === 0 ? (
+              ) : activeDashboardLeaves.length === 0 ? (
                 <div className="py-6 text-center space-y-1">
                   <Plane className="w-8 h-8 text-[#DDD6C8] mx-auto" />
-                  <p className="text-xs text-[#70685F]">No leave requests submitted within your scope.</p>
+                  <p className="text-xs text-[#70685F]">No active leave requests within your scope.</p>
                 </div>
               ) : (
                 <div className="space-y-2.5">
-                  {leaveRequests.map((leave) => {
+                  {activeDashboardLeaves.map((leave) => {
                     const isSelf = leave.requestedBy === currentUser?.id;
                     return (
                       <div

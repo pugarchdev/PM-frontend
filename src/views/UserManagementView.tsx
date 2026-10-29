@@ -819,9 +819,8 @@ export const UserManagementView: React.FC = () => {
                   >
                     <option value="Executive Leadership">Executive Leadership</option>
                     <option value="Operations">Operations</option>
-                    <option value="Architecture">Architecture</option>
-                    <option value="Engineering">Engineering</option>
-                    <option value="Interior Design">Interior Design</option>
+                    <option value="Development">Development</option>
+                    <option value="Q&A">Q&A</option>
                     <option value="Project Management">Project Management</option>
                   </select>
                 </div>

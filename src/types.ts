@@ -36,6 +36,7 @@ export interface User {
   department: string | null;
   avatarUrl: string | null;
   isSignupCompleted?: boolean;
+  isOnLeave?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }

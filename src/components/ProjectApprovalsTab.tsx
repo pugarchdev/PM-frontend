@@ -38,13 +38,33 @@ export const ProjectApprovalsTab: React.FC<ProjectApprovalsTabProps> = ({ projec
 
   // Modals
   const [showNewModal, setShowNewModal] = useState(false);
-  const [requestType, setRequestType] = useState<'Budget' | 'Timeline' | 'Scope'>('Budget');
+  const [requestType, setRequestType] = useState<'Budget' | 'Timeline' | 'Scope'>(isEmployee ? 'Timeline' : 'Budget');
   const [summary, setSummary] = useState('');
   const [detail, setDetail] = useState('');
   const [impact, setImpact] = useState('');
   const [requestedAmount, setRequestedAmount] = useState('');
   const [movesBaselinedMilestone, setMovesBaselinedMilestone] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  const availableRequestTypes: Array<'Budget' | 'Timeline' | 'Scope'> = isEmployee
+    ? ['Timeline', 'Scope']
+    : ['Budget', 'Timeline', 'Scope'];
+
+  useEffect(() => {
+    if (isEmployee && requestType === 'Budget') {
+      setRequestType('Timeline');
+    }
+  }, [isEmployee, requestType]);
+
+  const handleOpenNewModal = () => {
+    setRequestType(isEmployee ? 'Timeline' : 'Budget');
+    setSummary('');
+    setDetail('');
+    setImpact('');
+    setRequestedAmount('');
+    setMovesBaselinedMilestone(false);
+    setShowNewModal(true);
+  };
 
   // Decision Modal
   const [decidingRequest, setDecidingRequest] = useState<ApprovalRequest | null>(null);
@@ -64,6 +84,10 @@ export const ProjectApprovalsTab: React.FC<ProjectApprovalsTabProps> = ({ projec
   const handleSubmitNew = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!summary.trim() || !detail.trim()) return;
+    if (isEmployee && requestType === 'Budget') {
+      alert('Employees are not authorized to submit budget approval requests.');
+      return;
+    }
     if (submittingRef.current || submitting) return;
     submittingRef.current = true;
 
@@ -89,6 +113,7 @@ export const ProjectApprovalsTab: React.FC<ProjectApprovalsTabProps> = ({ projec
       }
 
       setShowNewModal(false);
+      setRequestType(isEmployee ? 'Timeline' : 'Budget');
       setSummary('');
       setDetail('');
       setImpact('');
@@ -196,7 +221,7 @@ export const ProjectApprovalsTab: React.FC<ProjectApprovalsTabProps> = ({ projec
 
         <button
           id="btn-submit-approval"
-          onClick={() => setShowNewModal(true)}
+          onClick={handleOpenNewModal}
           className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-[#C85A32] hover:bg-[#A63C1E] active:scale-95 text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow-xs transition-transform cursor-pointer min-h-[44px]"
         >
           <Plus className="w-4 h-4" />
@@ -350,8 +375,8 @@ export const ProjectApprovalsTab: React.FC<ProjectApprovalsTabProps> = ({ projec
             <form onSubmit={handleSubmitNew} className="space-y-3.5">
               <div>
                 <label className="block text-xs font-semibold text-[#231E1B] mb-1">Request Type *</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(['Budget', 'Timeline', 'Scope'] as const).map((t) => (
+                <div className={`grid gap-2 ${availableRequestTypes.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+                  {availableRequestTypes.map((t) => (
                     <button
                       key={t}
                       type="button"
@@ -368,7 +393,7 @@ export const ProjectApprovalsTab: React.FC<ProjectApprovalsTabProps> = ({ projec
                 </div>
               </div>
 
-              {requestType === 'Budget' && (
+              {!isEmployee && requestType === 'Budget' && (
                 <div>
                   <label className="block text-xs font-semibold text-[#231E1B] mb-1">
                     Requested Amount ({CURRENCY_SYMBOL}) *
