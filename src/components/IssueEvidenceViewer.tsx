@@ -1,5 +1,5 @@
-import React from 'react';
-import { X, Download, ExternalLink, FileText, FileSpreadsheet, FileImage, File } from 'lucide-react';
+import React, { useState } from 'react';
+import { X, Download, ExternalLink, FileText, FileSpreadsheet, FileImage, File, Trash2 } from 'lucide-react';
 import { IssueAttachment } from '../types.ts';
 import { apiUrl } from '../lib/api.ts';
 
@@ -7,12 +7,14 @@ interface IssueEvidenceViewerProps {
   issueId: string;
   attachment: IssueAttachment | null;
   onClose: () => void;
+  onDeleteAttachment?: (issueId: string, attachmentId: string) => Promise<void>;
 }
 
 export const IssueEvidenceViewer: React.FC<IssueEvidenceViewerProps> = ({
   issueId,
   attachment,
   onClose,
+  onDeleteAttachment,
 }) => {
   if (!attachment) return null;
 
@@ -64,6 +66,24 @@ export const IssueEvidenceViewer: React.FC<IssueEvidenceViewerProps> = ({
               <Download className="w-3.5 h-3.5" />
               <span>Download</span>
             </a>
+            {onDeleteAttachment && (
+              <button
+                onClick={async () => {
+                  if (
+                    window.confirm(
+                      `Are you sure you want to permanently delete "${attachment.fileName}"?\n\nThis will also permanently remove the file from Cloudinary storage.`
+                    )
+                  ) {
+                    await onDeleteAttachment(issueId, attachment.id);
+                  }
+                }}
+                className="px-3.5 py-1.5 rounded-full text-xs font-semibold bg-[#FEE2E2] text-[#991B1B] hover:bg-[#FECACA] flex items-center gap-1.5 min-h-[36px] transition-colors cursor-pointer"
+                title="Delete this attachment from Cloudinary"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete</span>
+              </button>
+            )}
             <button
               onClick={onClose}
               className="p-1.5 text-gray-400 hover:text-black rounded-xl hover:bg-[#EAE4D6] min-h-[36px] min-w-[36px] flex items-center justify-center cursor-pointer transition-colors"

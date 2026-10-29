@@ -32,6 +32,7 @@ import {
   File as FileIcon,
   ChevronDown,
   ChevronUp,
+  Trash2,
 } from 'lucide-react';
 
 interface IssuesViewProps {
@@ -145,6 +146,57 @@ export const IssuesView: React.FC<IssuesViewProps> = ({ onSelectProject }) => {
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
+    }
+  };
+
+  const [deletingIssueId, setDeletingIssueId] = useState<string | null>(null);
+
+  const handleDeleteIssue = async (issue: Issue) => {
+    const attCount = issue.attachments?.length || 0;
+    const confirmMsg =
+      attCount > 0
+        ? `Are you sure you want to permanently delete this issue and its ${attCount} image/document attachment(s)?\n\nThis will also permanently delete the files from Cloudinary storage.`
+        : `Are you sure you want to permanently delete this issue?`;
+
+    if (!window.confirm(confirmMsg)) {
+      return;
+    }
+
+    try {
+      setDeletingIssueId(issue.id);
+      const res = await apiFetch(`/api/issues/${issue.id}`, {
+        method: 'DELETE',
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to delete issue');
+      }
+
+      showToast('success', 'Issue and evidence files deleted permanently from cloud storage.');
+      invalidateIssueQueries(queryClient, currentUser?.id, issue.projectId);
+      invalidateProjectQueries(queryClient, currentUser?.id, issue.projectId, { issues: true });
+    } catch (err: any) {
+      showToast('error', err.message || 'Failed to delete issue');
+    } finally {
+      setDeletingIssueId(null);
+    }
+  };
+
+  const handleDeleteAttachment = async (issueId: string, attachmentId: string) => {
+    try {
+      const res = await apiFetch(`/api/issues/${issueId}/attachments/${attachmentId}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to delete attachment');
+      }
+      setSelectedEvidence(null);
+      showToast('success', 'Attachment deleted permanently from cloud storage.');
+      invalidateIssueQueries(queryClient, currentUser?.id);
+    } catch (err: any) {
+      showToast('error', err.message || 'Failed to delete attachment');
     }
   };
 
@@ -509,7 +561,7 @@ export const IssuesView: React.FC<IssuesViewProps> = ({ onSelectProject }) => {
                   </div>
 
                   {/* Actions */}
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-1.5 shrink-0">
                     {isClosed && canManageIssue ? (
                       <button
                         onClick={() => {
@@ -528,6 +580,17 @@ export const IssuesView: React.FC<IssuesViewProps> = ({ onSelectProject }) => {
                         Close Issue
                       </button>
                     ) : null}
+
+                    {canManageIssue && (
+                      <button
+                        onClick={() => handleDeleteIssue(issue)}
+                        disabled={deletingIssueId === issue.id}
+                        className="p-2 rounded-full text-[#991B1B] hover:bg-[#FEE2E2] active:scale-95 transition-all cursor-pointer min-h-[40px] min-w-[40px] flex items-center justify-center shrink-0 disabled:opacity-50"
+                        title="Delete issue and files from Cloudinary"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -691,6 +754,7 @@ export const IssuesView: React.FC<IssuesViewProps> = ({ onSelectProject }) => {
           issueId={selectedEvidence.issueId}
           attachment={selectedEvidence.attachment}
           onClose={() => setSelectedEvidence(null)}
+          onDeleteAttachment={handleDeleteAttachment}
         />
       )}
 

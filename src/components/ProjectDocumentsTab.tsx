@@ -11,6 +11,7 @@ import {
   File,
   RefreshCw,
   Search,
+  Trash2,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { apiFetch, apiUrl } from '../lib/api.ts';
@@ -195,6 +196,80 @@ export const ProjectDocumentsTab: React.FC<ProjectDocumentsTabProps> = ({ projec
     }
   };
 
+  const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
+  const [deletingVersion, setDeletingVersion] = useState<{ docId: string; version: number } | null>(null);
+
+  const handleDeleteDocument = async (doc: DocumentItem) => {
+    if (
+      !window.confirm(
+        `Are you sure you want to permanently delete "${doc.title}" and its ${doc.versions.length} version(s)?\n\nThis will also permanently delete all associated files from Cloudinary storage.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setDeletingDocId(doc.id);
+      const res = await apiFetch(`/api/documents/${doc.id}`, {
+        method: 'DELETE',
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to delete document');
+      }
+
+      invalidateProjectQueries(queryClient, currentUser?.id, projectId, { documents: true });
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete document');
+    } finally {
+      setDeletingDocId(null);
+    }
+  };
+
+  const handleDeleteVersion = async (docId: string, version: number) => {
+    if (
+      !window.confirm(
+        `Are you sure you want to delete Version ${version}?\n\nThis will permanently delete this file version from Cloudinary storage.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setDeletingVersion({ docId, version });
+      const res = await apiFetch(`/api/documents/${docId}/versions/${version}`, {
+        method: 'DELETE',
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to delete version');
+      }
+
+      const data = await res.json();
+      if (data.documentDeleted) {
+        setViewingHistoryDoc(null);
+      } else {
+        setViewingHistoryDoc((prev) => {
+          if (!prev) return null;
+          const remaining = prev.versions.filter((v) => v.version !== version);
+          return {
+            ...prev,
+            versions: remaining,
+            currentVersion: prev.currentVersion === version ? remaining[0]?.version || prev.currentVersion : prev.currentVersion,
+          };
+        });
+      }
+
+      invalidateProjectQueries(queryClient, currentUser?.id, projectId, { documents: true });
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete version');
+    } finally {
+      setDeletingVersion(null);
+    }
+  };
+
   const formatBytes = (bytes: number) => {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -336,18 +411,29 @@ export const ProjectDocumentsTab: React.FC<ProjectDocumentsTabProps> = ({ projec
                     </button>
                   </div>
 
-                  <button
-                    onClick={() => {
-                      setTargetDoc(doc);
-                      setVersionFile(null);
-                      setVersionComment('');
-                      setVersionError(null);
-                    }}
-                    className="px-3 py-2.5 rounded-xl text-xs font-semibold text-[#526E55] hover:bg-[#EBF2EB] active:scale-95 flex items-center gap-1 transition-transform cursor-pointer min-h-[44px]"
-                  >
-                    <FilePlus className="w-3.5 h-3.5" />
-                    New Version
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => {
+                        setTargetDoc(doc);
+                        setVersionFile(null);
+                        setVersionComment('');
+                        setVersionError(null);
+                      }}
+                      className="px-3 py-2.5 rounded-xl text-xs font-semibold text-[#526E55] hover:bg-[#EBF2EB] active:scale-95 flex items-center gap-1 transition-transform cursor-pointer min-h-[44px]"
+                    >
+                      <FilePlus className="w-3.5 h-3.5" />
+                      New Version
+                    </button>
+
+                    <button
+                      onClick={() => handleDeleteDocument(doc)}
+                      disabled={deletingDocId === doc.id}
+                      className="p-2.5 rounded-xl text-[#991B1B] hover:bg-[#FEE2E2] active:scale-95 transition-all cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center shrink-0 disabled:opacity-50"
+                      title="Delete document and files from Cloudinary"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
             );
@@ -640,14 +726,24 @@ export const ProjectDocumentsTab: React.FC<ProjectDocumentsTabProps> = ({ projec
                     </div>
                   </div>
 
-                  <a
-                    href={apiUrl(`/api/documents/${viewingHistoryDoc.id}/download?version=${v.version}`)}
-                    download
-                    className="px-3 py-2 rounded-xl bg-white hover:bg-[#EDE7DC] active:scale-95 text-xs font-semibold flex items-center gap-1 text-[#231E1B] shrink-0 border border-[#DDD6C8] min-h-[38px]"
-                  >
-                    <Download className="w-3.5 h-3.5 text-[#C85A32]" />
-                    Download
-                  </a>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <a
+                      href={apiUrl(`/api/documents/${viewingHistoryDoc.id}/download?version=${v.version}`)}
+                      download
+                      className="px-3 py-2 rounded-xl bg-white hover:bg-[#EDE7DC] active:scale-95 text-xs font-semibold flex items-center gap-1 text-[#231E1B] shrink-0 border border-[#DDD6C8] min-h-[38px]"
+                    >
+                      <Download className="w-3.5 h-3.5 text-[#C85A32]" />
+                      Download
+                    </a>
+                    <button
+                      onClick={() => handleDeleteVersion(viewingHistoryDoc.id, v.version)}
+                      disabled={deletingVersion?.docId === viewingHistoryDoc.id && deletingVersion?.version === v.version}
+                      className="p-2 rounded-xl text-[#991B1B] hover:bg-[#FEE2E2] active:scale-95 text-xs font-semibold flex items-center justify-center shrink-0 border border-[#FECACA] min-h-[38px] min-w-[38px] cursor-pointer disabled:opacity-50"
+                      title={`Delete version ${v.version} from Cloudinary`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

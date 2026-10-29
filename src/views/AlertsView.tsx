@@ -168,6 +168,268 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onSelectProject, onShowC
   const pendingApprovals = reviewableLeaves.filter((l) => l.status === 'Pending');
   const pendingLeave = activeDashboardLeaves.filter((l) => l.status === 'Pending');
 
+  const renderProjectCard = (p: DashboardProject) => {
+    const internCount = p.members.filter((m) => m.isIntern).length;
+    const staffCount = p.members.filter((m) => !m.isIntern).length;
+
+    return (
+      <div
+        key={p.id}
+        onClick={() => onSelectProject(p.id)}
+        className="p-4 sm:p-5 rounded-2xl bg-white border border-[#E8E2D5] hover:border-[#D5C9B8] hover:shadow-md transition-all cursor-pointer space-y-3 flex flex-col justify-between"
+      >
+        <div className="space-y-2">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h4 className="font-serif font-bold text-base text-[#231E1B] truncate">
+                  {p.name}
+                </h4>
+                <StatusBadge status={p.status} />
+              </div>
+              {p.goal && (
+                <p className="text-xs text-[#70675D] line-clamp-2 mt-1">{p.goal}</p>
+              )}
+            </div>
+            <ArrowRight className="w-4 h-4 text-[#8C7E70] shrink-0 mt-1" />
+          </div>
+
+          {/* Progress vs Plan */}
+          <div className="space-y-1 pt-1">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-[#70675D]">
+                Progress: <strong className="text-[#231E1B]">{p.progress}%</strong>
+              </span>
+              <span className="text-[#70675D]">
+                Plan: <strong className="text-[#231E1B]">{p.plan}%</strong>
+              </span>
+            </div>
+            <div className="h-2 w-full bg-[#FAF7F2] rounded-full overflow-hidden border border-[#EAE3D5]">
+              <div
+                style={{ width: `${Math.min(p.progress, 100)}%` }}
+                className={`h-full ${
+                  p.status === 'ON_TRACK'
+                    ? 'bg-[#2D5A34]'
+                    : p.status === 'AT_RISK'
+                    ? 'bg-[#D97706]'
+                    : 'bg-[#DC2626]'
+                }`}
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between text-xs text-[#70675D] pt-1">
+            <span>Tasks: <strong>{p.completedTasksCount}/{p.totalTasksCount}</strong> completed</span>
+            <span>Owner: <strong>{p.owner?.name || 'Unassigned'}</strong></span>
+          </div>
+        </div>
+
+        {/* Project Team & Interns (Deduplicated) */}
+        <div className="pt-2.5 border-t border-[#F2ECE1] space-y-1.5">
+          <div className="flex items-center justify-between text-[11px]">
+            <span className="font-semibold text-[#5A524A] flex items-center gap-1">
+              <Users className="w-3 h-3 text-[#C85A32]" />
+              Project Team ({p.members.length})
+            </span>
+            <span className="text-[#8C8275]">
+              {internCount > 0 ? `${internCount} intern(s) • ` : ''}{staffCount} staff
+            </span>
+          </div>
+
+          {p.members.length === 0 ? (
+            <div className="text-[11px] text-[#A8A195] italic">No members assigned</div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-1.5 max-h-20 overflow-y-auto no-scrollbar">
+              {p.members.map((m) => (
+                <div
+                  key={m.id}
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] border ${
+                    m.isIntern
+                      ? 'bg-[#F3E8FF] text-[#6B21A8] border-[#E9D5FF] font-semibold'
+                      : m.role === 'CTO' || m.role === 'CEO'
+                      ? 'bg-[#EFF6FF] text-[#1E40AF] border-[#BFDBFE] font-semibold'
+                      : 'bg-[#FAF8F4] text-[#554E44] border-[#EAE3D5]'
+                  }`}
+                  title={`${m.name} (${m.role} - ${m.membershipType}) • ${m.assignedTasksCount} tasks`}
+                >
+                  <img
+                    src={m.avatarUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(m.name)}`}
+                    alt={m.name}
+                    className="w-3.5 h-3.5 rounded-full border border-white"
+                  />
+                  <span className="truncate max-w-[90px]">{m.name}</span>
+                  <span className="opacity-75">
+                    {m.isIntern ? '• Intern' : `• ${m.role}`}
+                  </span>
+                  {m.assignedTasksCount > 0 && (
+                    <span className="ml-0.5 px-1 rounded-full bg-white/70 text-[9px] font-bold">
+                      {m.assignedTasksCount}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderTodayCalendar = (showStandaloneHeader: boolean = true) => {
+    return (
+      <div className="space-y-3.5">
+        {showStandaloneHeader && (
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Calendar className="w-4 h-4 sm:w-5 sm:h-5 text-[#C85A32]" />
+              <h3 className="font-serif text-base sm:text-lg font-bold text-[#231E1B]">
+                Today's Calendar
+              </h3>
+              {todayEvents.length > 0 && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#FAF3EC] text-[#C85A32] border border-[#E8D7C8]">
+                  {todayEvents.length}
+                </span>
+              )}
+            </div>
+            <button
+              onClick={() => fetchTodayEvents()}
+              className="text-xs text-[#70675D] hover:text-[#C85A32] flex items-center gap-1 cursor-pointer py-1 px-2 rounded-lg hover:bg-[#FAF7F2] transition-colors"
+            >
+              <Clock className="w-3.5 h-3.5" />
+              Refresh
+            </button>
+          </div>
+        )}
+
+        <div className="bg-white border border-[#E8E2D5] rounded-2xl p-3.5 sm:p-4 space-y-2.5 shadow-2xs">
+          {!showStandaloneHeader && (
+            <div className="flex items-center justify-between pb-1 border-b border-[#F5F1E8]">
+              <div className="flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-[#C85A32]" />
+                <h4 className="font-serif text-sm font-bold text-[#231E1B]">
+                  Today's Calendar
+                </h4>
+                {todayEvents.length > 0 && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#FAF3EC] text-[#C85A32] border border-[#E8D7C8]">
+                    {todayEvents.length}
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={() => fetchTodayEvents()}
+                className="text-xs text-[#70675D] hover:text-[#C85A32] flex items-center gap-1 cursor-pointer py-0.5 px-2 rounded-lg hover:bg-[#FAF7F2] transition-colors"
+              >
+                <Clock className="w-3 h-3" />
+                Refresh
+              </button>
+            </div>
+          )}
+
+          {todayEventsLoading ? (
+            <div className="space-y-2">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-10 bg-[#FAF7F2] rounded-xl animate-pulse" />
+              ))}
+            </div>
+          ) : todayEvents.length === 0 ? (
+            <div className="py-6 text-center text-xs text-[#A8A195]">
+              No events scheduled for today
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {todayEvents.slice(0, 4).map((event) => {
+                const { extendedProps } = event;
+                const type = extendedProps?.type || 'task';
+
+                return (
+                  <div
+                    key={event.id}
+                    onClick={() => {
+                      if (extendedProps?.projectId) {
+                        switch (type) {
+                          case 'task':
+                            onSelectProject(extendedProps.projectId, 'tasks');
+                            break;
+                          case 'milestone':
+                            onSelectProject(extendedProps.projectId, 'milestones');
+                            break;
+                          case 'approval':
+                            onSelectProject(extendedProps.projectId, 'approvals');
+                            break;
+                          case 'risk':
+                            onSelectProject(extendedProps.projectId, 'risks');
+                            break;
+                          case 'issue':
+                            onSelectProject(extendedProps.projectId, 'issues');
+                            break;
+                          default:
+                            break;
+                        }
+                      }
+                    }}
+                    className={`px-3 py-2 rounded-xl border transition-all active:scale-[0.99] hover:shadow-2xs ${
+                      type === 'task'
+                        ? 'bg-[#F2F7FF] border-[#D6E6FE] hover:border-[#BFDBFE]'
+                        : type === 'milestone'
+                        ? 'bg-[#F0FDF4] border-[#DCFCE7] hover:border-[#BBF7D0]'
+                        : type === 'approval'
+                        ? 'bg-[#FEFCE8] border-[#FEF08A] hover:border-[#FDE047]'
+                        : type === 'risk'
+                        ? 'bg-[#FFF7ED] border-[#FFEDD5] hover:border-[#FED7AA]'
+                        : type === 'issue'
+                        ? 'bg-[#FEF2F2] border-[#FEE2E2] hover:border-[#FECACA]'
+                        : 'bg-[#FAF5FF] border-[#F3E8FF] hover:border-[#E9D5FF]'
+                    } ${extendedProps?.projectId ? 'cursor-pointer' : 'cursor-default'}`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-semibold text-xs text-[#231E1B] truncate">
+                        {event.title}
+                      </div>
+                      <span
+                        className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider shrink-0 ${
+                          type === 'task'
+                            ? 'bg-blue-100/90 text-blue-700'
+                            : type === 'milestone'
+                            ? 'bg-emerald-100/90 text-emerald-700'
+                            : type === 'approval'
+                            ? 'bg-amber-100/90 text-amber-800'
+                            : type === 'risk'
+                            ? 'bg-orange-100/90 text-orange-800'
+                            : type === 'issue'
+                            ? 'bg-rose-100/90 text-rose-700'
+                            : 'bg-purple-100/90 text-purple-700'
+                        }`}
+                      >
+                        {type}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-[#70675D] mt-0.5 truncate">
+                      {extendedProps?.projectName || 'General reminder'}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="pt-1.5 border-t border-[#F0EAE0]">
+            <button
+              onClick={() => {
+                if (onShowCalendar) {
+                  onShowCalendar();
+                }
+              }}
+              className="w-full py-2 rounded-xl bg-[#FAF7F2] hover:bg-[#EDE7DC] active:scale-[0.99] border border-[#E0D9CB] text-[#70685F] hover:text-[#231E1B] text-xs font-semibold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+            >
+              <Calendar className="w-3.5 h-3.5 text-[#C85A32]" />
+              View Full Calendar
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-5 sm:space-y-6 pb-20 sm:pb-24 max-w-full overflow-hidden sm:overflow-visible">
       {/* Leave toast */}
@@ -572,18 +834,19 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onSelectProject, onShowC
         </div>
       )}
 
-      {/* Authorized Projects & Progress Showcase */}
+      {/* Authorized Projects & Today's Calendar Showcase */}
       {loading && !data ? (
-        <div className="space-y-3.5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Briefcase className="w-4 h-4 sm:w-5 sm:h-5 text-[#C85A32]" />
-              <div className="h-5 w-56 bg-[#EAE3D5] rounded-md animate-pulse" />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5 sm:gap-4 items-start">
+          {/* Left: Project Skeleton */}
+          <div className="space-y-3.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Briefcase className="w-4 h-4 sm:w-5 sm:h-5 text-[#C85A32]" />
+                <div className="h-5 w-56 bg-[#EAE3D5] rounded-md animate-pulse" />
+              </div>
+              <div className="h-3 w-28 bg-[#EAE3D5] rounded animate-pulse" />
             </div>
-            <div className="h-3 w-28 bg-[#EAE3D5] rounded animate-pulse" />
-          </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5 sm:gap-4">
             <div className="p-4 sm:p-5 rounded-2xl bg-white border border-[#E8E2D5] shadow-xs space-y-3 flex flex-col justify-between animate-pulse">
               <div className="space-y-2">
                 <div className="flex items-start justify-between gap-2">
@@ -609,132 +872,86 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onSelectProject, onShowC
               </div>
             </div>
           </div>
-        </div>
-      ) : (
-        <div className="space-y-3.5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Briefcase className="w-4 h-4 sm:w-5 sm:h-5 text-[#C85A32]" />
-              <h3 className="font-serif text-base sm:text-lg font-bold text-[#231E1B]">
-                {isExecutiveDashboard
-                  ? `Organization Projects & Progress (${data.dashboardProjects.length})`
-                  : isManagerDashboard
-                  ? `Authorized Projects & Team Progress (${data.dashboardProjects.length})`
-                  : `Your Authorized Projects (${data.dashboardProjects.length})`}
-              </h3>
+
+          {/* Right: Today's Calendar Skeleton */}
+          <div className="space-y-3.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Calendar className="w-4 h-4 sm:w-5 sm:h-5 text-[#C85A32]" />
+                <div className="h-5 w-36 bg-[#EAE3D5] rounded-md animate-pulse" />
+              </div>
+              <div className="h-3 w-16 bg-[#EAE3D5] rounded animate-pulse" />
             </div>
-            <span className="text-xs text-[#70675D]">
-              Click project to inspect details
-            </span>
+
+            <div className="bg-white border border-[#E8E2D5] rounded-2xl p-3.5 sm:p-4 space-y-2.5 shadow-2xs animate-pulse">
+              <div className="space-y-2">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="h-10 bg-[#FAF7F2] rounded-xl" />
+                ))}
+              </div>
+              <div className="h-9 bg-[#FAF7F2] rounded-xl" />
+            </div>
+          </div>
+        </div>
+      ) : (data?.dashboardProjects && data.dashboardProjects.length <= 1) ? (
+        /* When 1 (or 0) project: Side-by-side layout with Today's Calendar on the right */
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5 sm:gap-4 items-start">
+          <div className="space-y-3.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Briefcase className="w-4 h-4 sm:w-5 sm:h-5 text-[#C85A32]" />
+                <h3 className="font-serif text-base sm:text-lg font-bold text-[#231E1B]">
+                  {isExecutiveDashboard
+                    ? `Organization Projects & Progress (${data.dashboardProjects.length})`
+                    : isManagerDashboard
+                    ? `Authorized Projects & Team Progress (${data.dashboardProjects.length})`
+                    : `Your Authorized Projects (${data.dashboardProjects.length})`}
+                </h3>
+              </div>
+              <span className="text-xs text-[#70675D]">
+                Click project to inspect details
+              </span>
+            </div>
+
+            {data.dashboardProjects.length === 0 ? (
+              <div className="p-6 rounded-2xl bg-white border border-[#E8E2D5] text-center text-xs text-[#70675D]">
+                No active projects authorized yet.
+              </div>
+            ) : (
+              data.dashboardProjects.map((p) => renderProjectCard(p))
+            )}
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5 sm:gap-4">
-            {data.dashboardProjects.map((p) => {
-              const internCount = p.members.filter((m) => m.isIntern).length;
-              const staffCount = p.members.filter((m) => !m.isIntern).length;
+          {/* Today's Calendar aligned on the right side */}
+          {renderTodayCalendar(true)}
+        </div>
+      ) : (
+        /* Multi-project layout: 2-col project showcase with compact Today's Calendar below */
+        <div className="space-y-4">
+          <div className="space-y-3.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Briefcase className="w-4 h-4 sm:w-5 sm:h-5 text-[#C85A32]" />
+                <h3 className="font-serif text-base sm:text-lg font-bold text-[#231E1B]">
+                  {isExecutiveDashboard
+                    ? `Organization Projects & Progress (${data?.dashboardProjects?.length || 0})`
+                    : isManagerDashboard
+                    ? `Authorized Projects & Team Progress (${data?.dashboardProjects?.length || 0})`
+                    : `Your Authorized Projects (${data?.dashboardProjects?.length || 0})`}
+                </h3>
+              </div>
+              <span className="text-xs text-[#70675D]">
+                Click project to inspect details
+              </span>
+            </div>
 
-              return (
-                <div
-                  key={p.id}
-                  onClick={() => onSelectProject(p.id)}
-                  className="p-4 sm:p-5 rounded-2xl bg-white border border-[#E8E2D5] hover:border-[#D5C9B8] hover:shadow-md transition-all cursor-pointer space-y-3 flex flex-col justify-between"
-                >
-                  <div className="space-y-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h4 className="font-serif font-bold text-base text-[#231E1B] truncate">
-                            {p.name}
-                          </h4>
-                          <StatusBadge status={p.status} />
-                        </div>
-                        {p.goal && (
-                          <p className="text-xs text-[#70675D] line-clamp-2 mt-1">{p.goal}</p>
-                        )}
-                      </div>
-                      <ArrowRight className="w-4 h-4 text-[#8C7E70] shrink-0 mt-1" />
-                    </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5 sm:gap-4">
+              {data?.dashboardProjects?.map((p) => renderProjectCard(p))}
+            </div>
+          </div>
 
-                    {/* Progress vs Plan */}
-                    <div className="space-y-1 pt-1">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-[#70675D]">
-                          Progress: <strong className="text-[#231E1B]">{p.progress}%</strong>
-                        </span>
-                        <span className="text-[#70675D]">
-                          Plan: <strong className="text-[#231E1B]">{p.plan}%</strong>
-                        </span>
-                      </div>
-                      <div className="h-2 w-full bg-[#FAF7F2] rounded-full overflow-hidden border border-[#EAE3D5]">
-                        <div
-                          style={{ width: `${Math.min(p.progress, 100)}%` }}
-                          className={`h-full ${
-                            p.status === 'ON_TRACK'
-                              ? 'bg-[#2D5A34]'
-                              : p.status === 'AT_RISK'
-                              ? 'bg-[#D97706]'
-                              : 'bg-[#DC2626]'
-                          }`}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between text-xs text-[#70675D] pt-1">
-                      <span>Tasks: <strong>{p.completedTasksCount}/{p.totalTasksCount}</strong> completed</span>
-                      <span>Owner: <strong>{p.owner?.name || 'Unassigned'}</strong></span>
-                    </div>
-                  </div>
-
-                  {/* Project Team & Interns (Deduplicated) */}
-                  <div className="pt-2.5 border-t border-[#F2ECE1] space-y-1.5">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="font-semibold text-[#5A524A] flex items-center gap-1">
-                        <Users className="w-3 h-3 text-[#C85A32]" />
-                        Project Team ({p.members.length})
-                      </span>
-                      <span className="text-[#8C8275]">
-                        {internCount > 0 ? `${internCount} intern(s) &bull; ` : ''}{staffCount} staff
-                      </span>
-                    </div>
-
-                    {p.members.length === 0 ? (
-                      <div className="text-[11px] text-[#A8A195] italic">No members assigned</div>
-                    ) : (
-                      <div className="flex flex-wrap items-center gap-1.5 max-h-20 overflow-y-auto no-scrollbar">
-                        {p.members.map((m) => (
-                          <div
-                            key={m.id}
-                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] border ${
-                              m.isIntern
-                                ? 'bg-[#F3E8FF] text-[#6B21A8] border-[#E9D5FF] font-semibold'
-                                : m.role === 'CTO' || m.role === 'CEO'
-                                ? 'bg-[#EFF6FF] text-[#1E40AF] border-[#BFDBFE] font-semibold'
-                                : 'bg-[#FAF8F4] text-[#554E44] border-[#EAE3D5]'
-                            }`}
-                            title={`${m.name} (${m.role} - ${m.membershipType}) • ${m.assignedTasksCount} tasks`}
-                          >
-                            <img
-                              src={m.avatarUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(m.name)}`}
-                              alt={m.name}
-                              className="w-3.5 h-3.5 rounded-full border border-white"
-                            />
-                            <span className="truncate max-w-[90px]">{m.name}</span>
-                            <span className="opacity-75">
-                              {m.isIntern ? '• Intern' : `• ${m.role}`}
-                            </span>
-                            {m.assignedTasksCount > 0 && (
-                              <span className="ml-0.5 px-1 rounded-full bg-white/70 text-[9px] font-bold">
-                                {m.assignedTasksCount}
-                              </span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5 sm:gap-4 items-start">
+            {renderTodayCalendar(true)}
           </div>
         </div>
       )}
@@ -796,105 +1013,6 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onSelectProject, onShowC
           </div>
         </div>
       )}
-
-
-      {/* Today's Calendar Preview */}
-      <div className="bg-white border border-[#E8E2D5] rounded-2xl p-3.5 sm:p-4 space-y-3 shadow-2xs">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Calendar className="w-4 h-4 sm:w-5 sm:h-5 text-[#C85A32]" />
-            <h3 className="font-serif text-base sm:text-lg font-bold text-[#231E1B]">Today's Calendar</h3>
-          </div>
-          <button
-            onClick={() => fetchTodayEvents()}
-            className="text-xs text-[#70675D] hover:text-[#C85A32] flex items-center gap-1 cursor-pointer py-1 px-2 rounded-lg hover:bg-[#FAF7F2] transition-colors"
-          >
-            <Clock className="w-3.5 h-3.5" />
-            Refresh
-          </button>
-        </div>
-        
-        {todayEventsLoading ? (
-          <div className="space-y-2">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="h-12 bg-[#FAF7F2] rounded-xl animate-pulse" />
-            ))}
-          </div>
-        ) : todayEvents.length === 0 ? (
-          <div className="py-4 text-center text-xs sm:text-sm text-[#A8A195]">
-            No events scheduled for today
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {todayEvents.slice(0, 5).map((event) => {
-              const { extendedProps } = event;
-              return (
-                <div
-                  key={event.id}
-                  onClick={() => {
-                    // Navigate to the appropriate page based on event type
-                    if (extendedProps.projectId) {
-                      switch (extendedProps.type) {
-                        case 'task':
-                          onSelectProject(extendedProps.projectId, 'tasks');
-                          break;
-                        case 'milestone':
-                          onSelectProject(extendedProps.projectId, 'milestones');
-                          break;
-                        case 'approval':
-                          onSelectProject(extendedProps.projectId, 'approvals');
-                          break;
-                        case 'risk':
-                          onSelectProject(extendedProps.projectId, 'risks');
-                          break;
-                        case 'issue':
-                          onSelectProject(extendedProps.projectId, 'issues');
-                          break;
-                        default:
-                          break;
-                      }
-                    }
-                  }}
-                  className={`p-3 rounded-xl border cursor-pointer transition-all active:scale-[0.99] hover:opacity-90 min-h-[44px] ${
-                    extendedProps.type === 'task' ? 'bg-blue-50 border-blue-200' :
-                    extendedProps.type === 'milestone' ? 'bg-green-50 border-green-200' :
-                    extendedProps.type === 'approval' ? 'bg-yellow-50 border-yellow-200' :
-                    extendedProps.type === 'risk' ? 'bg-orange-50 border-orange-200' :
-                    extendedProps.type === 'issue' ? 'bg-red-50 border-red-200' :
-                    'bg-purple-50 border-purple-200'
-                  } ${!extendedProps.projectId ? 'cursor-default hover:opacity-100' : ''}`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="font-medium text-xs sm:text-sm text-[#231E1B] truncate">
-                      {event.title}
-                    </div>
-                    <div className="text-[10px] sm:text-xs text-[#70675D] capitalize shrink-0 font-medium">
-                      {extendedProps.type}
-                    </div>
-                  </div>
-                  <div className="text-[11px] text-[#70675D] mt-0.5 truncate">
-                    {extendedProps.projectName || 'Personal reminder'}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-        
-        <div className="pt-2 border-t border-[#E8E2D5]">
-          <button
-            onClick={() => {
-              if (onShowCalendar) {
-                onShowCalendar();
-              }
-            }}
-            className="w-full py-2.5 rounded-xl bg-[#F5F1E8] hover:bg-[#EDE7DC] active:scale-[0.99] border border-[#E0D9CB] text-[#70685F] hover:text-[#231E1B] text-xs sm:text-sm font-semibold transition-all cursor-pointer min-h-[44px] flex items-center justify-center gap-1.5"
-          >
-            <Calendar className="w-4 h-4 text-[#C85A32]" />
-            View Full Calendar
-          </button>
-        </div>
-      </div>
 
       {/* ─── Dynamic Leave Approvals for CEO and Authorized Managers ────────────── */}
       {canReviewLeaves && (

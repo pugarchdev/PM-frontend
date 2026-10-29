@@ -835,6 +835,35 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     }
   };
 
+  // DELETE ISSUE (permanently deletes from DB and Cloudinary)
+  const handleDeleteIssue = async (issueId: string, title: string, attachmentsCount: number = 0) => {
+    const confirmMsg =
+      attachmentsCount > 0
+        ? `Are you sure you want to permanently delete issue "${title}" and its ${attachmentsCount} attachment(s)?\n\nThis will also permanently delete the files from Cloudinary storage.`
+        : `Are you sure you want to permanently delete issue "${title}"?`;
+
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      const res = await apiFetch(`/api/issues/${issueId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to delete issue');
+      }
+      setProject((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          issues: (prev.issues || []).filter((i) => i.id !== issueId),
+        };
+      });
+      showToast('success', 'Issue and evidence files deleted permanently from cloud storage.');
+      fetchProject(false, { issues: true });
+    } catch (err: any) {
+      showToast('error', err.message || 'Failed to delete issue');
+    }
+  };
+
   // REOPEN ISSUE (Requires comment!)
   const handleReopenIssueSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1754,7 +1783,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                       <p className="text-xs text-[#554E44]">{issue.detail}</p>
                     </div>
 
-                    <div>
+                    <div className="flex items-center gap-1.5 shrink-0">
                       {(() => {
                         const canManageIssue = canManage || issue.raisedBy === currentUser?.id || issue.ownerId === currentUser?.id;
                         if (isClosed && canManageIssue) {
@@ -1782,6 +1811,15 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                         }
                         return null;
                       })()}
+                      {(canManage || issue.raisedBy === currentUser?.id || issue.ownerId === currentUser?.id) && (
+                        <button
+                          onClick={() => handleDeleteIssue(issue.id, issue.title, issue.attachments?.length || 0)}
+                          className="p-2 rounded-full text-[#991B1B] hover:bg-[#FEE2E2] active:scale-95 transition-all cursor-pointer min-h-[38px] min-w-[38px] flex items-center justify-center shrink-0"
+                          title="Delete issue and files from Cloudinary"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -2672,6 +2710,22 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
           issueId={selectedEvidence.issueId}
           attachment={selectedEvidence.attachment}
           onClose={() => setSelectedEvidence(null)}
+          onDeleteAttachment={async (issueId, attachmentId) => {
+            try {
+              const res = await apiFetch(`/api/issues/${issueId}/attachments/${attachmentId}`, {
+                method: 'DELETE',
+              });
+              if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                throw new Error(data.error || 'Failed to delete attachment');
+              }
+              setSelectedEvidence(null);
+              showToast('success', 'Attachment deleted permanently from cloud storage.');
+              fetchProject(false, { issues: true });
+            } catch (err: any) {
+              showToast('error', err.message || 'Failed to delete attachment');
+            }
+          }}
         />
       )}
     </div>
