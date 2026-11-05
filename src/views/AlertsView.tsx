@@ -276,6 +276,9 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onSelectProject, onShowC
   };
 
   const renderTodayCalendar = (showStandaloneHeader: boolean = true) => {
+    // Strictly show only active tasks scheduled for today
+    const todayTasks = todayEvents.filter((event: any) => (event.extendedProps?.type || 'task') === 'task');
+
     return (
       <div className="space-y-3.5">
         {showStandaloneHeader && (
@@ -285,9 +288,9 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onSelectProject, onShowC
               <h3 className="font-serif text-base sm:text-lg font-bold text-[#231E1B]">
                 Today's Calendar
               </h3>
-              {todayEvents.length > 0 && (
+              {todayTasks.length > 0 && (
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#FAF3EC] text-[#C85A32] border border-[#E8D7C8]">
-                  {todayEvents.length}
+                  {todayTasks.length}
                 </span>
               )}
             </div>
@@ -309,9 +312,9 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onSelectProject, onShowC
                 <h4 className="font-serif text-sm font-bold text-[#231E1B]">
                   Today's Calendar
                 </h4>
-                {todayEvents.length > 0 && (
+                {todayTasks.length > 0 && (
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#FAF3EC] text-[#C85A32] border border-[#E8D7C8]">
-                    {todayEvents.length}
+                    {todayTasks.length}
                   </span>
                 )}
               </div>
@@ -331,80 +334,38 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onSelectProject, onShowC
                 <div key={i} className="h-10 bg-[#FAF7F2] rounded-xl animate-pulse" />
               ))}
             </div>
-          ) : todayEvents.length === 0 ? (
+          ) : todayTasks.length === 0 ? (
             <div className="py-6 text-center text-xs text-[#A8A195]">
-              No events scheduled for today
+              No tasks scheduled for today
             </div>
           ) : (
             <div className="space-y-1.5">
-              {todayEvents.slice(0, 4).map((event) => {
+              {todayTasks.slice(0, 5).map((event) => {
                 const { extendedProps } = event;
-                const type = extendedProps?.type || 'task';
 
                 return (
                   <div
                     key={event.id}
                     onClick={() => {
                       if (extendedProps?.projectId) {
-                        switch (type) {
-                          case 'task':
-                            onSelectProject(extendedProps.projectId, 'tasks');
-                            break;
-                          case 'milestone':
-                            onSelectProject(extendedProps.projectId, 'milestones');
-                            break;
-                          case 'approval':
-                            onSelectProject(extendedProps.projectId, 'approvals');
-                            break;
-                          case 'risk':
-                            onSelectProject(extendedProps.projectId, 'risks');
-                            break;
-                          case 'issue':
-                            onSelectProject(extendedProps.projectId, 'issues');
-                            break;
-                          default:
-                            break;
-                        }
+                        onSelectProject(extendedProps.projectId, 'tasks');
                       }
                     }}
-                    className={`px-3 py-2 rounded-xl border transition-all active:scale-[0.99] hover:shadow-2xs ${
-                      type === 'task'
-                        ? 'bg-[#F2F7FF] border-[#D6E6FE] hover:border-[#BFDBFE]'
-                        : type === 'milestone'
-                        ? 'bg-[#F0FDF4] border-[#DCFCE7] hover:border-[#BBF7D0]'
-                        : type === 'approval'
-                        ? 'bg-[#FEFCE8] border-[#FEF08A] hover:border-[#FDE047]'
-                        : type === 'risk'
-                        ? 'bg-[#FFF7ED] border-[#FFEDD5] hover:border-[#FED7AA]'
-                        : type === 'issue'
-                        ? 'bg-[#FEF2F2] border-[#FEE2E2] hover:border-[#FECACA]'
-                        : 'bg-[#FAF5FF] border-[#F3E8FF] hover:border-[#E9D5FF]'
-                    } ${extendedProps?.projectId ? 'cursor-pointer' : 'cursor-default'}`}
+                    className="px-3 py-2 rounded-xl border transition-all active:scale-[0.99] hover:shadow-2xs bg-[#F2F7FF] border-[#D6E6FE] hover:border-[#BFDBFE] cursor-pointer"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="font-semibold text-xs text-[#231E1B] truncate">
                         {event.title}
                       </div>
-                      <span
-                        className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider shrink-0 ${
-                          type === 'task'
-                            ? 'bg-blue-100/90 text-blue-700'
-                            : type === 'milestone'
-                            ? 'bg-emerald-100/90 text-emerald-700'
-                            : type === 'approval'
-                            ? 'bg-amber-100/90 text-amber-800'
-                            : type === 'risk'
-                            ? 'bg-orange-100/90 text-orange-800'
-                            : type === 'issue'
-                            ? 'bg-rose-100/90 text-rose-700'
-                            : 'bg-purple-100/90 text-purple-700'
-                        }`}
-                      >
-                        {type}
+                      <span className="text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider shrink-0 bg-blue-100/90 text-blue-700">
+                        TASK
                       </span>
                     </div>
-                    <div className="text-[10px] text-[#70675D] mt-0.5 truncate">
-                      {extendedProps?.projectName || 'General reminder'}
+                    <div className="text-[10px] text-[#70675D] mt-0.5 truncate flex items-center justify-between">
+                      <span>{extendedProps?.projectName || 'Project Task'}</span>
+                      {extendedProps?.state && (
+                        <span className="text-[9px] text-[#A8A195] font-medium">{extendedProps.state}</span>
+                      )}
                     </div>
                   </div>
                 );

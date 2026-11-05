@@ -26,6 +26,7 @@ import {
   Plus,
   Edit2,
   Trash2,
+  RotateCcw,
   Archive,
   Lock,
   Clock,
@@ -72,7 +73,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
   initialTab = 'phases',
   onBack,
 }) => {
-  const { currentUser, isCEO, isProjectOwner, isEmployee } = useAuth();
+  const { currentUser, isCEO, isCTO, isProjectOwner, isEmployee } = useAuth();
   const { data: usersList = [] } = useUsersListQuery(currentUser?.id);
 
   const {
@@ -1026,6 +1027,77 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
     }
   };
 
+  const [updatingMilestoneId, setUpdatingMilestoneId] = useState<string | null>(null);
+
+  // Complete or revert milestone (CEO and CTO only)
+  const handleToggleMilestoneAchieved = async (milestoneId: string, achieve: boolean) => {
+    if (!canManageMilestones) {
+      showToast('error', 'Only CEO and CTO have permission to update milestones.');
+      return;
+    }
+    setUpdatingMilestoneId(milestoneId);
+    try {
+      const actualDate = achieve ? new Date().toISOString() : null;
+      const res = await apiFetch(`/api/milestones/${milestoneId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actualDate }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update milestone status');
+
+      // Optimistic update
+      setProject((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          milestones: (prev.milestones || []).map((m) =>
+            m.id === milestoneId ? { ...m, actualDate: data.actualDate } : m
+          ),
+        };
+      });
+
+      showToast('success', achieve ? 'Milestone marked as Achieved!' : 'Milestone reverted to Pending.');
+      fetchProject(false, { tasks: true });
+    } catch (err: any) {
+      showToast('error', err.message);
+    } finally {
+      setUpdatingMilestoneId(null);
+    }
+  };
+
+  // Delete milestone (CEO and CTO only)
+  const handleDeleteMilestone = async (milestoneId: string, title: string) => {
+    if (!canManageMilestones) {
+      showToast('error', 'Only CEO and CTO have permission to delete milestones.');
+      return;
+    }
+    if (!window.confirm(`Are you sure you want to delete milestone "${title}"?`)) return;
+    setUpdatingMilestoneId(milestoneId);
+    try {
+      const res = await apiFetch(`/api/milestones/${milestoneId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to delete milestone');
+      }
+
+      setProject((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          milestones: (prev.milestones || []).filter((m) => m.id !== milestoneId),
+        };
+      });
+
+      showToast('success', 'Milestone deleted');
+      fetchProject(false, { tasks: true });
+    } catch (err: any) {
+      showToast('error', err.message);
+    } finally {
+      setUpdatingMilestoneId(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="space-y-4 pb-24">
@@ -1053,6 +1125,8 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
 
   const metrics = project.metrics!;
   const canManage = isCEO || (isProjectOwner && project.ownerId === currentUser?.id);
+  // CEO and CTO have full control over milestones
+  const canManageMilestones = isCEO || isCTO;
   // Any authenticated project member can create tasks (Employee, ProjectOwner, CEO)
   const isProjectMember = project.memberships?.some((m) => m.user.id === currentUser?.id) ?? false;
   const canCreateTask = isCEO || (isProjectOwner && project.ownerId === currentUser?.id) || isProjectMember;
@@ -2013,7 +2087,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
             <h3 className="font-serif text-lg font-bold text-[#231E1B]">
               Milestones ({project.milestones.length})
             </h3>
-            {canManage && (
+            {canManageMilestones && (
               <button
                 id="add-milestone-btn"
                 onClick={() => setShowNewMilestoneModal(true)}
@@ -2031,7 +2105,7 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
               return (
                 <div
                   key={m.id}
-                  className="p-4 rounded-2xl bg-white border border-[#EAE3D5] flex items-center justify-between gap-3 shadow-xs"
+                  className="p-4 rounded-2xl bg-white border border-[#EAE3D5] flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs"
                 >
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
@@ -2051,10 +2125,48 @@ export const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({
                       Baseline: {new Date(m.baselineDate).toLocaleDateString()} · Forecast:{' '}
                       {new Date(m.forecastDate).toLocaleDateString()}
                       {m.actualDate && (
-                        <span> · Actual: {new Date(m.actualDate).toLocaleDateString()}</span>
+                        <span className="text-[#2D5A34] font-semibold"> · Actual: {new Date(m.actualDate).toLocaleDateString()}</span>
                       )}
                     </div>
                   </div>
+
+                  {canManageMilestones && (
+                    <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                      {isAchieved ? (
+                        <button
+                          id={`revert-milestone-${m.id}`}
+                          onClick={() => handleToggleMilestoneAchieved(m.id, false)}
+                          disabled={updatingMilestoneId === m.id}
+                          className="px-3 py-1.5 rounded-xl border border-[#EAE3D5] hover:bg-[#FAF6EE] text-[#70675D] hover:text-[#231E1B] text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 min-h-[36px]"
+                          title="Revert milestone status to pending"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          Revert to Pending
+                        </button>
+                      ) : (
+                        <button
+                          id={`achieve-milestone-${m.id}`}
+                          onClick={() => handleToggleMilestoneAchieved(m.id, true)}
+                          disabled={updatingMilestoneId === m.id}
+                          className="px-3.5 py-1.5 rounded-xl bg-[#2D5A34] hover:bg-[#234729] text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50 min-h-[36px]"
+                          title="Mark milestone as achieved today"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          Mark Achieved
+                        </button>
+                      )}
+
+                      <button
+                        id={`delete-milestone-${m.id}`}
+                        onClick={() => handleDeleteMilestone(m.id, m.title)}
+                        disabled={updatingMilestoneId === m.id}
+                        className="p-2 rounded-xl text-[#A0988A] hover:text-[#B93815] hover:bg-[#FDF2F0] transition-colors cursor-pointer disabled:opacity-50"
+                        title="Delete milestone"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}

@@ -148,7 +148,12 @@ export function useCalendarTodayQuery(userId?: string) {
     queryKey: queryKeys.calendarToday(userId),
     queryFn: async ({ signal }) => {
       try {
-        return await apiGet<any[]>('/api/calendar/today', { signal });
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const localDate = `${year}-${month}-${day}`;
+        return await apiGet<any[]>(`/api/calendar/today?date=${localDate}`, { signal });
       } catch {
         return [];
       }
