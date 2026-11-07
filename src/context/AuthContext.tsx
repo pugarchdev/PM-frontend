@@ -23,7 +23,7 @@ interface AuthContextType {
   signup: (data: { email: string; phone: string; password: string; confirmPassword?: string; code?: string; name?: string }) => Promise<{ success: boolean; error?: string }>;
   forgotPassword: (data: { identifier: string }) => Promise<{ success: boolean; error?: string; devCode?: string; message?: string }>;
   resetPassword: (data: { identifier: string; code: string; newPassword: string; confirmPassword?: string }) => Promise<{ success: boolean; error?: string; message?: string }>;
-  preRegisterUser: (data: { name: string; email: string; phone: string; department?: string; role?: string; roleId?: string; managerId?: string }) => Promise<{ success: boolean; error?: string; user?: User }>;
+  preRegisterUser: (data: { name: string; email: string; phone: string; department?: string; role?: string; roleId?: string; managerId?: string; portalUrl?: string }) => Promise<{ success: boolean; error?: string; user?: User }>;
   updateProfile: (data: { name: string; email?: string; phone?: string; department?: string }) => Promise<{ success: boolean; error?: string; user?: User }>;
   logout: () => Promise<void>;
   switchUser: (userId: string) => Promise<void>;
@@ -261,12 +261,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     role?: string;
     roleId?: string;
     managerId?: string;
+    portalUrl?: string;
   }): Promise<{ success: boolean; error?: string; user?: User }> => {
     try {
+      const clientOrigin = typeof window !== 'undefined' ? window.location.origin : undefined;
       const res = await apiFetch('/api/users/pre-register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: JSON.stringify({
+          ...data,
+          portalUrl: data.portalUrl || clientOrigin,
+        }),
       });
       const resData = await res.json();
       if (!res.ok) {

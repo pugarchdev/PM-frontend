@@ -52,6 +52,7 @@ export const AuthView: React.FC = () => {
   // Determine initial tab from current URL
   const getInitialTab = (): AuthTab => {
     if (location.pathname === '/signup' || location.pathname === '/verify-account') return 'signup';
+    if (new URLSearchParams(window.location.search).has('email') || new URLSearchParams(window.location.search).has('phone')) return 'signup';
     if (location.pathname === '/forgot-password' || location.pathname === '/reset-password') return 'forgot';
     return 'signin';
   };
@@ -100,10 +101,13 @@ export const AuthView: React.FC = () => {
     return 1;
   });
   const [signupEmail, setSignupEmail] = useState<string>(
-    () => sessionStorage.getItem('ff_signup_email') || ''
+    () => new URLSearchParams(window.location.search).get('email') || sessionStorage.getItem('ff_signup_email') || ''
   );
   const [signupPhone, setSignupPhone] = useState<string>(
-    () => sessionStorage.getItem('ff_signup_phone') || ''
+    () => {
+      const p = new URLSearchParams(window.location.search).get('phone');
+      return p ? p.replace(/\D/g, '').slice(0, 10) : (sessionStorage.getItem('ff_signup_phone') || '');
+    }
   );
   const [signupName, setSignupName] = useState<string>(
     () => sessionStorage.getItem('ff_signup_name') || ''
@@ -119,6 +123,21 @@ export const AuthView: React.FC = () => {
   const [signupConfirmPassword, setSignupConfirmPassword] = useState<string>('');
   const [showSignupPassword, setShowSignupPassword] = useState<boolean>(false);
   const [showSignupConfirmPassword, setShowSignupConfirmPassword] = useState<boolean>(false);
+
+  // Pre-fill email and phone from portal activation link query parameters
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const emailParam = params.get('email');
+    const phoneParam = params.get('phone');
+    if (emailParam) {
+      setSignupEmail(emailParam.trim());
+      setTab('signup');
+    }
+    if (phoneParam) {
+      setSignupPhone(phoneParam.replace(/\D/g, '').slice(0, 10));
+      setTab('signup');
+    }
+  }, [location.search]);
 
   // Sync signupCode whenever otpDigits change
   useEffect(() => {
@@ -310,10 +329,17 @@ export const AuthView: React.FC = () => {
     resetAllFeedback();
 
     const cleanEmail = signupEmail.trim();
-    const cleanPhone = signupPhone.trim();
+    const cleanPhone = signupPhone.replace(/\D/g, '').slice(0, 10);
 
     if (!cleanEmail || !cleanPhone) {
       const msg = 'Please provide both your pre-registered work email and mobile phone number.';
+      setError(msg);
+      showToast('error', msg);
+      return;
+    }
+
+    if (cleanPhone.length !== 10) {
+      const msg = 'Please enter a valid 10-digit mobile phone number (numbers only, no symbols or country code).';
       setError(msg);
       showToast('error', msg);
       return;
@@ -565,7 +591,7 @@ export const AuthView: React.FC = () => {
     try {
       const res = await signup({
         email: signupEmail.trim(),
-        phone: signupPhone.trim(),
+        phone: signupPhone.replace(/\D/g, '').slice(0, 10),
         name: signupName.trim() || undefined,
         password: signupPassword,
         confirmPassword: signupConfirmPassword,
@@ -1065,10 +1091,34 @@ export const AuthView: React.FC = () => {
                         name="phone"
                         type="tel"
                         required
+                        maxLength={10}
+                        inputMode="numeric"
+                        pattern="[0-9]{10}"
                         autoComplete="tel"
-                        placeholder="e.g. +44 20 7946 0992 or 02079460992"
+                        placeholder="e.g. 8985557000"
                         value={signupPhone}
-                        onChange={(e) => setSignupPhone(e.target.value)}
+                        onChange={(e) => {
+                          const digits = e.target.value.replace(/\D/g, '').slice(0, 10);
+                          setSignupPhone(digits);
+                        }}
+                        onKeyDown={(e) => {
+                          if (
+                            ['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter'].includes(e.key) ||
+                            e.ctrlKey ||
+                            e.metaKey
+                          ) {
+                            return;
+                          }
+                          if (!/^\d$/.test(e.key)) {
+                            e.preventDefault();
+                          }
+                        }}
+                        onPaste={(e) => {
+                          e.preventDefault();
+                          const text = e.clipboardData.getData('text');
+                          const digits = text.replace(/\D/g, '').slice(0, 10);
+                          setSignupPhone(digits);
+                        }}
                         className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-[#DDD6C8] bg-white text-xs text-[#231E1B] placeholder-[#A49C90] focus:outline-hidden focus:ring-2 focus:ring-[#C85A32]/25 focus:border-[#C85A32] min-h-[44px]"
                       />
                     </div>

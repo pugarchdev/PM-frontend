@@ -111,13 +111,19 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
       return;
     }
 
+    const cleanPhone = formPhone.replace(/\D/g, '');
+    if (cleanPhone.length !== 10) {
+      setFormError('Please enter a valid 10-digit mobile phone number (numbers only, no symbols or country code).');
+      return;
+    }
+
     setSubmitting(true);
     try {
       const selectedRole = roles.find((r) => r.id === formRoleId);
       const res = await preRegisterUser({
         name: formName.trim(),
         email: formEmail.trim(),
-        phone: formPhone.trim(),
+        phone: cleanPhone,
         department: formDept.trim(),
         role: selectedRole?.name || 'Employee',
         roleId: formRoleId || undefined,
@@ -423,9 +429,33 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
                 <input
                   type="tel"
                   required
-                  placeholder="e.g. +44 20 7946 0998"
+                  maxLength={10}
+                  inputMode="numeric"
+                  pattern="[0-9]{10}"
+                  placeholder="e.g. 8985557000"
                   value={formPhone}
-                  onChange={(e) => setFormPhone(e.target.value)}
+                  onChange={(e) => {
+                    const digits = e.target.value.replace(/\D/g, '').slice(0, 10);
+                    setFormPhone(digits);
+                  }}
+                  onKeyDown={(e) => {
+                    if (
+                      ['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter'].includes(e.key) ||
+                      e.ctrlKey ||
+                      e.metaKey
+                    ) {
+                      return;
+                    }
+                    if (!/^\d$/.test(e.key)) {
+                      e.preventDefault();
+                    }
+                  }}
+                  onPaste={(e) => {
+                    e.preventDefault();
+                    const text = e.clipboardData.getData('text');
+                    const digits = text.replace(/\D/g, '').slice(0, 10);
+                    setFormPhone(digits);
+                  }}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-[#DDD6C8] bg-white text-xs text-[#231E1B] placeholder-[#8F867A] focus:outline-hidden focus:border-[#C85A32] min-h-[44px]"
                 />
               </div>
