@@ -4,19 +4,43 @@
  * as well as same-domain / relative proxy deployments.
  */
 
-const isLocalhost =
+/**
+ * Detects whether the client is accessing the app locally (desktop or mobile over local Wi-Fi / LAN).
+ */
+export const isLocalNetwork =
   typeof window !== 'undefined' &&
   (window.location.hostname === 'localhost' ||
    window.location.hostname === '127.0.0.1' ||
-   window.location.hostname === '0.0.0.0');
+   window.location.hostname === '0.0.0.0' ||
+   window.location.hostname.endsWith('.local') ||
+   /^192\.168\.\d{1,3}\.\d{1,3}$/.test(window.location.hostname) ||
+   /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(window.location.hostname) ||
+   /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(window.location.hostname));
 
 const rawEnvUrl = (((import.meta as any).env?.VITE_API_URL || '') as string).trim();
 // Strip trailing slashes and trailing /api to prevent duplicate /api/api/... paths
 const cleanEnvUrl = rawEnvUrl.replace(/\/api\/?$/, '').replace(/\/$/, '');
 
-// On localhost, always use relative path ("") to route through Vite's local dev server proxy.
-// In production, use VITE_API_URL if configured, or same-origin.
-export const API_BASE_URL: string = isLocalhost ? '' : cleanEnvUrl;
+// Check if cleanEnvUrl is pointing to localhost
+const isEnvUrlLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?$/i.test(cleanEnvUrl);
+
+/**
+ * On local network (localhost or mobile testing on local Wi-Fi e.g. 192.168.x.x),
+ * always use relative path ("") so requests route through Vite's dev server proxy.
+ * This prevents mobile phones from trying to call "localhost:5000" on the phone itself!
+ * In production, if VITE_API_URL points to localhost, fall back to relative path ("").
+ */
+function resolveApiBaseUrl(): string {
+  if (isLocalNetwork) {
+    return '';
+  }
+  if (!cleanEnvUrl || isEnvUrlLocalhost) {
+    return '';
+  }
+  return cleanEnvUrl;
+}
+
+export const API_BASE_URL: string = resolveApiBaseUrl();
 
 /**
  * Structured API Client Error with HTTP status classification.

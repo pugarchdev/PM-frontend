@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Users,
@@ -16,7 +16,8 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '../lib/api.ts';
 import { useAuth } from '../context/AuthContext.tsx';
-import { useUsersManagementQuery, useRolesQuery, invalidateUserQueries } from '../lib/queries.ts';
+import { User } from '../types.ts';
+import { useUsersManagementQuery, useUsersListQuery, useRolesQuery, invalidateUserQueries } from '../lib/queries.ts';
 import { queryClient } from '../lib/queryClient.ts';
 
 interface ManagedUser {
@@ -51,13 +52,19 @@ interface UserManagementModalProps {
 }
 
 export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen, onClose }) => {
-  const { currentUser, preRegisterUser } = useAuth();
+  const { currentUser, directory = [], preRegisterUser } = useAuth();
   const [activeTab, setActiveTab] = useState<'list' | 'create'>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'completed'>('all');
 
   const { data: usersData = [], isLoading: usersLoading, error: usersErr } = useUsersManagementQuery(currentUser?.id);
   const { data: rolesData = [], isLoading: rolesLoading } = useRolesQuery(currentUser?.id);
+  const { data: allActiveUsers = [] } = useUsersListQuery(currentUser?.id);
+
+  const eligibleManagers = useMemo(() => {
+    const list = (allActiveUsers.length > 0 ? allActiveUsers : directory) as User[];
+    return list.filter((u) => u.isSignupCompleted !== false);
+  }, [allActiveUsers, directory]);
 
   const users = usersData as ManagedUser[];
   const roles = rolesData as RoleOption[];
@@ -465,13 +472,11 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
                   className="w-full px-3 py-2.5 rounded-xl border border-[#DDD6C8] bg-white text-xs text-[#231E1B] focus:outline-hidden focus:border-[#C85A32] min-h-[44px]"
                 >
                   <option value="">None (Top-Level / Self-Managed)</option>
-                  {users
-                    .filter((u) => u.isSignupCompleted)
-                    .map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name} — {u.role} ({u.email})
-                      </option>
-                    ))}
+                  {eligibleManagers.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name} — {u.role} ({u.email})
+                    </option>
+                  ))}
                 </select>
               </div>
 

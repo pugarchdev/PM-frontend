@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import {
   Users,
@@ -24,8 +24,8 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '../lib/api.ts';
 import { useAuth } from '../context/AuthContext.tsx';
-import { RoleDefinition } from '../types.ts';
-import { useUsersManagementQuery, useUsersSummaryQuery, useRolesQuery, invalidateUserQueries } from '../lib/queries.ts';
+import { RoleDefinition, User } from '../types.ts';
+import { useUsersManagementQuery, useUsersSummaryQuery, useUsersListQuery, useRolesQuery, invalidateUserQueries } from '../lib/queries.ts';
 import { queryClient } from '../lib/queryClient.ts';
 import { useDebounce } from '../lib/useDebounce.ts';
 
@@ -52,7 +52,7 @@ export const UserManagementView: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { id: routeUserId } = useParams<{ id: string }>();
-  const { currentUser, preRegisterUser, isExecutive, canManageUsers } = useAuth();
+  const { currentUser, directory = [], preRegisterUser, isExecutive, canManageUsers } = useAuth();
 
   // Determine active tab based on route pathname
   const isCreateRoute = location.pathname === '/users/register';
@@ -80,6 +80,13 @@ export const UserManagementView: React.FC = () => {
     }
   );
   const { data: rolesData = [], isLoading: rolesLoading } = useRolesQuery(currentUser?.id);
+  const { data: allActiveUsers = [] } = useUsersListQuery(currentUser?.id);
+
+  // Full list of completed users who can serve as reporting managers (independent of current tab's statusFilter)
+  const eligibleManagers = useMemo(() => {
+    const list = (allActiveUsers.length > 0 ? allActiveUsers : directory) as User[];
+    return list.filter((u) => u.isSignupCompleted !== false);
+  }, [allActiveUsers, directory]);
 
   const users = usersData as ManagedUser[];
   const roles = rolesData as RoleDefinition[];
@@ -853,13 +860,11 @@ export const UserManagementView: React.FC = () => {
                   className="w-full px-3.5 py-2.5 rounded-xl border border-[#DDD6C8] bg-white text-xs text-[#231E1B] focus:outline-hidden focus:border-[#C85A32] min-h-[44px]"
                 >
                   <option value="">None (Top-Level / Self-Managed)</option>
-                  {users
-                    .filter((u) => u.isSignupCompleted)
-                    .map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name} — {u.role} ({u.email})
-                      </option>
-                    ))}
+                  {eligibleManagers.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name} — {u.role} ({u.email})
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -1036,8 +1041,8 @@ export const UserManagementView: React.FC = () => {
                   className="w-full px-3 py-2 rounded-xl border border-[#DDD6C8] bg-white text-xs text-[#231E1B] focus:outline-hidden focus:border-[#C85A32]"
                 >
                   <option value="">None (Top-Level / Self-Managed)</option>
-                  {users
-                    .filter((u) => u.id !== reassignUser.id && u.isSignupCompleted)
+                  {eligibleManagers
+                    .filter((u) => u.id !== reassignUser.id)
                     .map((u) => (
                       <option key={u.id} value={u.id}>
                         {u.name} — {u.role} ({u.email})

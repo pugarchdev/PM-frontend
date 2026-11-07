@@ -1,27 +1,23 @@
 import { io, Socket } from 'socket.io-client';
-import { API_BASE_URL } from './api.ts';
+import { API_BASE_URL, isLocalNetwork } from './api.ts';
 
 let socket: Socket | null = null;
 let currentUserId: string | null = null;
 const activeProjectRooms = new Set<string>();
 
-const isLocalhost =
-  typeof window !== 'undefined' &&
-  (window.location.hostname === 'localhost' ||
-   window.location.hostname === '127.0.0.1' ||
-   window.location.hostname === '0.0.0.0');
-
 /**
  * Returns the sanitized target Socket.IO URL.
- * - In Development (localhost): Empty string to leverage Vite proxy
+ * - In Development (localhost & mobile on Wi-Fi): Empty string to leverage Vite proxy
  * - In Production: VITE_API_URL or API_BASE_URL (with trailing / and /api stripped), or window.location.origin
  */
 export function getSocketUrl(): string {
-  if (isLocalhost) return '';
+  if (isLocalNetwork) return '';
 
   const rawEnv = (((import.meta as any).env?.VITE_API_URL || '') as string).trim();
   const cleanedEnv = rawEnv.replace(/\/api\/?$/, '').replace(/\/$/, '');
-  if (cleanedEnv) return cleanedEnv;
+  const isEnvLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?$/i.test(cleanedEnv);
+
+  if (cleanedEnv && !isEnvLocalhost) return cleanedEnv;
 
   if (API_BASE_URL) {
     return API_BASE_URL.replace(/\/api\/?$/, '').replace(/\/$/, '');
